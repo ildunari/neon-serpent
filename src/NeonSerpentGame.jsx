@@ -115,6 +115,21 @@ export default function NeonSerpentGame() {
     // Pass canvasSizeRef.current if needed? No, it's read inside the loop.
   }, [gameState, keyDir, joyVec, joystickState.active]); // Removed startGame from deps
 
+  // Moved useCallback hooks before useEffect that uses them
+  const handleMenuSelect = useCallback((idx) => {
+    setMenuIndex(idx);
+    const action = menuOptions[idx];
+    if (action === 'Start Game' || action === 'Restart Game') {
+      startGame(); // Call startGame here
+    } else if (action === 'Controls') {
+      setShowControls(true);
+    }
+  }, [startGame]); // startGame is a dependency
+
+  const handleControlsBack = useCallback(() => {
+    setShowControls(false);
+  }, []);
+
   // Menu Navigation and Selection
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -146,20 +161,6 @@ export default function NeonSerpentGame() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [gameState, menuIndex, showControls, handleMenuSelect, handleControlsBack]); // Added handleMenuSelect/handleControlsBack
-
-  const handleMenuSelect = useCallback((idx) => {
-    setMenuIndex(idx);
-    const action = menuOptions[idx];
-    if (action === 'Start Game' || action === 'Restart Game') {
-      startGame(); // Call startGame here
-    } else if (action === 'Controls') {
-      setShowControls(true);
-    }
-  }, [startGame]); // startGame is a dependency
-
-  const handleControlsBack = useCallback(() => {
-    setShowControls(false);
-  }, []);
 
   return (
     <div className="game-container"> {/* Add a container div */}

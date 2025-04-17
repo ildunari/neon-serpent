@@ -3,7 +3,8 @@
 /*  ----------  background constants  ----------  */
 // path is relative to the public/ folder
 export const BG_SRC = '/cave-city.mp4'; // Using video now, keep var name for potential future use? Or remove? Let's keep for now.
-export const BG_SCALE = 0.25; // May not be relevant for video background tiling logic
+export const BG_SCALE = 1.5; // Changed from 0.25 to 1.5 for zoom-in
+export const BG_PARALLAX = 0.3; // Parallax factor for background scrolling
 
 /*  ----------  world constants  ----------  */
 export const WORLD_SIZE   = 4000;               // square wrap‑around world
@@ -16,7 +17,7 @@ export const SELF_GAP         = 8;     // ignore first N segments for player sel
 export const TOUCH_DEADZONE_PX = 16;   // min drag distance before a touch turn registers (DEPRECATED? see JOY_DEADZONE)
 export const ENEMY_NECK_GAP   = 4;     // ignore first N segments for AI necks
 /* ---------- safety constant ---------- */
-// “safe” tail distance (in px) used to decide how many neck links to ignore
+// "safe" tail distance (in px) used to decide how many neck links to ignore
 // when checking if the player bites its own tail. Bigger == more forgiving.
 export const SAFE_PX = 64;
 
