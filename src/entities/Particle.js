@@ -1,16 +1,27 @@
 // extracted from NeonSerpentGame_backup.jsx on 2025-04-17
-// TODO: Implement Particle class based on original code
+import { rand } from '../utils/math'; // Assuming rand is in math utils
 
 export default class Particle {
   constructor(x, y) {
-    // TODO
+    this.x = x; this.y = y;
+    this.vx = rand(-2, 2);
+    this.vy = rand(-2, 2);
+    this.life = 30; // Lifespan in ticks/frames
   }
 
   update() {
-    // TODO
+    this.x += this.vx;
+    this.y += this.vy;
+    this.life--;
   }
 
   draw(ctx, cam) {
-    // TODO
+    if (this.life <= 0) return;
+    const alpha = this.life / 30;
+    // Draw particle relative to camera
+    const sx = this.x - cam.x;
+    const sy = this.y - cam.y;
+    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+    ctx.fillRect(sx, sy, 2, 2); // Simple square particle
   }
 }

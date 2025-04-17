@@ -3,13 +3,25 @@ import React from 'react';
 
 /**
  * Menu overlay component
- * @param {{ menuIndex: number, setMenuIndex: Function, onSelect: Function }} props
+ * @param {{ menuIndex: number, setMenuIndex: Function, onSelect: Function, menuOptions: string[] }} props
  */
-export default function MenuOverlay({ menuIndex, setMenuIndex, onSelect }) {
-  // TODO: Move menu button JSX here from backup file
+export default function MenuOverlay({ menuIndex, setMenuIndex, onSelect, menuOptions }) {
   return (
     <div className="menu-overlay">
-      {/* ...existing code... */}
+      <h1>Neon Serpent</h1>
+      <div className="menu-buttons">
+        {menuOptions.map((opt, idx) => (
+          <button
+            key={opt}
+            className={idx === menuIndex ? 'selected' : ''}
+            onClick={() => onSelect(idx)} // Use the passed onSelect handler
+            onMouseEnter={() => setMenuIndex(idx)} // Update index on hover
+          >
+            {opt}
+          </button>
+        ))}
+      </div>
+      <p className="hint">Use Arrow Keys or WASD to navigate, Enter or Space to select.</p>
     </div>
   );
 }
