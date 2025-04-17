@@ -134,22 +134,9 @@ export function updateWorld(world, dt, viewW, viewH) { // Add viewW, viewH param
       // Potentially set game state here or return a flag
   }
 
-
   // camera follows head, centered in view
-  if (viewW && viewH) { // Only update camera if view dimensions are provided
-    world.cam.x = lerp(world.cam.x, p.segs[0].x - viewW * 0.5, CAM_SMOOTH);
-    world.cam.y = lerp(world.cam.y, p.segs[0].y - viewH * 0.5, CAM_SMOOTH);
-  } else {
-    // Fallback or warning if dimensions missing? Keep old behavior for now?
-    // Or just center based on last known good coords? Let's stick to the lerp without centering.
-    world.cam.x = lerp(world.cam.x, p.segs[0].x, CAM_SMOOTH);
-    world.cam.y = lerp(world.cam.y, p.segs[0].y, CAM_SMOOTH);
-    if (!world.warnedAboutMissingViewDims) {
-        console.warn("updateWorld called without viewW/viewH, camera centering disabled.");
-        world.warnedAboutMissingViewDims = true; // Prevent spamming console
-    }
-  }
-
+  world.cam.x = lerp(world.cam.x, p.segs[0].x - viewW * 0.5, CAM_SMOOTH);
+  world.cam.y = lerp(world.cam.y, p.segs[0].y - viewH * 0.5, CAM_SMOOTH);
 
   return world;
 }

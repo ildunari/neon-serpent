@@ -15,13 +15,12 @@ export function drawWorld(ctx, world, viewWidth, viewHeight) {
   // Save context state before applying transformations/styles
   ctx.save();
 
-  // Optional: Draw world boundary (if desired, can be toggled with a constant)
-  // This needs to be drawn relative to the camera
-  // ctx.strokeStyle = 'rgba(255,0,0,0.35)';
-  // ctx.lineWidth = 4;
-  // ctx.setLineDash([12, 8]);
-  // ctx.strokeRect(-world.cam.x, -world.cam.y, WORLD_SIZE, WORLD_SIZE);
-  // ctx.setLineDash([]);
+  // Draw world boundary (red dashed border)
+  ctx.strokeStyle = 'rgba(255,0,0,0.35)';
+  ctx.lineWidth = 4;
+  ctx.setLineDash([12, 8]);
+  ctx.strokeRect(-world.cam.x, -world.cam.y, WORLD_SIZE, WORLD_SIZE);
+  ctx.setLineDash([]);
 
   /* Draw entities */
   // Ensure entities have draw methods that accept (ctx, world.cam)
