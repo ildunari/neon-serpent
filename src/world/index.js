@@ -5,7 +5,7 @@ import { INITIAL_AI, ORB_COUNT, WORLD_SIZE, ENEMY_NECK_GAP, CAM_SMOOTH } from '.
 import Snake, { createAISnake } from '../entities/Snake'; // Need Snake class and helper for respawn/creation
 import Orb from '../entities/Orb'; // Need Orb class
 import Particle from '../entities/Particle'; // Need Particle class
-import { rand, randInt, dist, playerSkip, segRadius, lerp } from '../utils/math'; // Need math/utility functions
+import { rand, randInt, dist, segRadius, lerp, playerSkip } from '../utils/math'; // Keep playerSkip for now, it seems used
 
 export function createWorld() {
   const orbs = Array.from({ length: ORB_COUNT }, () =>
@@ -111,7 +111,7 @@ export function handleCollisions(w) {
   }
 }
 
-export function updateWorld(world, dt) { // dt is not used currently, but passed in
+export function updateWorld(world, dt, viewW, viewH) { // Add viewW, viewH params
   const p = world.player;
 
   if (p.dead) return world; // Don't update if player is dead
@@ -135,14 +135,20 @@ export function updateWorld(world, dt) { // dt is not used currently, but passed
   }
 
 
-  // camera follows head (adjust for view dimensions if needed)
-  // Assuming cam target is player head, centered in view. View dimensions needed for centering.
-  // This might be better handled in the rendering/canvas component.
-  // world.cam.x = lerp(world.cam.x, p.segs[0].x - viewWidth / 2, CAM_SMOOTH);
-  // world.cam.y = lerp(world.cam.y, p.segs[0].y - viewHeight / 2, CAM_SMOOTH);
-  // Simple lerp towards player head for now:
-  world.cam.x = lerp(world.cam.x, p.segs[0].x, CAM_SMOOTH);
-  world.cam.y = lerp(world.cam.y, p.segs[0].y, CAM_SMOOTH);
+  // camera follows head, centered in view
+  if (viewW && viewH) { // Only update camera if view dimensions are provided
+    world.cam.x = lerp(world.cam.x, p.segs[0].x - viewW * 0.5, CAM_SMOOTH);
+    world.cam.y = lerp(world.cam.y, p.segs[0].y - viewH * 0.5, CAM_SMOOTH);
+  } else {
+    // Fallback or warning if dimensions missing? Keep old behavior for now?
+    // Or just center based on last known good coords? Let's stick to the lerp without centering.
+    world.cam.x = lerp(world.cam.x, p.segs[0].x, CAM_SMOOTH);
+    world.cam.y = lerp(world.cam.y, p.segs[0].y, CAM_SMOOTH);
+    if (!world.warnedAboutMissingViewDims) {
+        console.warn("updateWorld called without viewW/viewH, camera centering disabled.");
+        world.warnedAboutMissingViewDims = true; // Prevent spamming console
+    }
+  }
 
 
   return world;

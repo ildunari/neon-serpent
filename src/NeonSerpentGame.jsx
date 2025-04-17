@@ -22,15 +22,25 @@ const controlsInfo = [
 ];
 
 export default function NeonSerpentGame() {
-  const [gameState, setGameState] = useState('menu'); // 'menu', 'playing', 'paused', 'gameover'
+  const [gameState, setGameState] = useState('menu'); // Default to 'menu'
   const [menuIndex, setMenuIndex] = useState(0);
   const [showControls, setShowControls] = useState(false);
   const worldRef = useRef(null); // Initialize as null, create world on start
   const lastTurnRef = useRef(0); // Track last turn time
+  const canvasSizeRef = useRef({ width: window.innerWidth, height: window.innerHeight }); // Track canvas size
 
   // Initialize input hooks
   const { keys, dir: keyDir } = useKeyboard();
   const { joystickState, vec: joyVec } = useJoystick(worldRef); // Pass worldRef
+
+  // Update canvas size ref on resize (could also get from useResizeCanvas if needed)
+  useEffect(() => {
+    const handleResize = () => {
+      canvasSizeRef.current = { width: window.innerWidth, height: window.innerHeight };
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Initialize world only when starting the game
   const startGame = useCallback(() => {
@@ -69,8 +79,8 @@ export default function NeonSerpentGame() {
           const player = worldRef.current.player;
           // Check if the turn is safe (not immediate 180, not into own tail)
           const isSafeTurn = !(desiredDir.x === -player.vx && desiredDir.y === -player.vy);
-          // Add willHitTail check if needed, requires passing world state
-          // const isSafeTurn = !(...) && !willHitTail(...);
+          // TODO: Add willHitTail check if needed, requires passing world state
+          // const isSafeTurn = !(...) && !willHitTail(player.segs[0].x + desiredDir.x * player.speed, player.segs[0].y + desiredDir.y * player.speed, player.segs, playerSkip(player));
 
           if (isSafeTurn) {
             player.vx = desiredDir.x;
@@ -81,8 +91,9 @@ export default function NeonSerpentGame() {
         }
         // --- End Input Processing ---
 
-        // Update world logic
-        worldRef.current = updateWorld(worldRef.current, dt);
+        // Update world logic - pass current canvas CSS dimensions
+        const { width: viewW, height: viewH } = canvasSizeRef.current;
+        worldRef.current = updateWorld(worldRef.current, dt, viewW, viewH);
 
         // Check for game over
         if (worldRef.current.player.dead) {
@@ -101,7 +112,8 @@ export default function NeonSerpentGame() {
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [gameState, keyDir, joyVec, joystickState.active, startGame]); // Add input states to dependencies
+    // Pass canvasSizeRef.current if needed? No, it's read inside the loop.
+  }, [gameState, keyDir, joyVec, joystickState.active]); // Removed startGame from deps
 
   // Menu Navigation and Selection
   useEffect(() => {
@@ -113,6 +125,7 @@ export default function NeonSerpentGame() {
           setMenuIndex(prev => (prev + 1) % menuOptions.length);
         } else if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault(); // Prevent spacebar scrolling
+          // Only call startGame from here or handleMenuSelect
           handleMenuSelect(menuIndex);
         }
       } else if (gameState === 'playing' && (e.key === 'Escape' || e.key === ' ')) {
@@ -132,24 +145,24 @@ export default function NeonSerpentGame() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [gameState, menuIndex, showControls]); // Dependencies for key handling
+  }, [gameState, menuIndex, showControls, handleMenuSelect, handleControlsBack]); // Added handleMenuSelect/handleControlsBack
 
   const handleMenuSelect = useCallback((idx) => {
     setMenuIndex(idx);
     const action = menuOptions[idx];
     if (action === 'Start Game' || action === 'Restart Game') {
-      startGame();
+      startGame(); // Call startGame here
     } else if (action === 'Controls') {
       setShowControls(true);
     }
-  }, [startGame]);
+  }, [startGame]); // startGame is a dependency
 
   const handleControlsBack = useCallback(() => {
     setShowControls(false);
   }, []);
 
   return (
-    <>
+    <div className="game-container"> {/* Add a container div */}
       {/* Always render canvas, but drawing depends on state */}
       <GameCanvas gameState={gameState} setGameState={setGameState} worldRef={worldRef} />
 
@@ -158,7 +171,7 @@ export default function NeonSerpentGame() {
         <MenuOverlay
           menuIndex={menuIndex}
           setMenuIndex={setMenuIndex}
-          onSelect={handleMenuSelect}
+          onSelect={handleMenuSelect} // Pass the memoized handler
           menuOptions={menuOptions} // Pass options
         />
       )}
@@ -182,6 +195,6 @@ export default function NeonSerpentGame() {
               <div className="joystick-knob" style={{ left: `${joystickState.cx + joystickState.dx}px`, top: `${joystickState.cy + joystickState.dy}px` }}></div>
           </div>
       )}
-    </>
+    </div> /* Close container div */
   );
 }

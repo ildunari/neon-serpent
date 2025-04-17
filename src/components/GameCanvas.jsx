@@ -2,12 +2,10 @@
 import React, { useRef, useEffect } from 'react';
 import { useResizeCanvas } from '../hooks/useResizeCanvas';
 import { drawWorld } from '../render';
-import { useKeyboard, useJoystick } from '../input';
-import { createWorld, updateWorld } from '../world'; // Assuming world/camera logic is handled elsewhere or needs adding
+import { createWorld } from '../world'; // Keep createWorld if needed elsewhere, or remove if only used in parent
 
 export default function GameCanvas({ gameState, setGameState, worldRef }) { // Added worldRef prop
   const canvasRef = useRef(null);
-  // const worldRef = useRef(null); // Removed, using prop instead
   const lastTurnRef = useRef(0);
   const lastTsRef = useRef(0);
   const bgVidRef = useRef(null); // Ref for the background video
@@ -17,64 +15,65 @@ export default function GameCanvas({ gameState, setGameState, worldRef }) { // A
   // Autoplay the background video
   useEffect(() => {
     bgVidRef.current?.play().catch(error => {
-      // Autoplay was prevented, handle error or inform user if necessary
       console.error("Video autoplay prevented:", error);
     });
   }, []); // Run once on mount
 
-  // Game loop logic (assuming drawWorld handles drawing, including background)
+  // Game loop logic (drawing only)
   useEffect(() => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
     const ctx = canvas.getContext('2d');
     let animationFrameId;
 
     const renderLoop = (timestamp) => {
       if (!canvas) return;
+
+      // Calculate view dimensions in CSS pixels
+      const dpr = canvas.width / window.innerWidth; // Assuming canvas fills window width
+      const viewW = canvas.width / dpr;
+      const viewH = canvas.height / dpr;
+
       // Clear canvas or handle background drawing
-      ctx.clearRect(0, 0, canvas.width, canvas.height); // Example clear
+      ctx.clearRect(0, 0, canvas.width, canvas.height); // Use raw canvas dimensions for clearing
 
       // Draw the video background with parallax
       if (bgVidRef.current?.readyState >= 2) { // HAVE_CURRENT_DATA or more
-        const w = bgVidRef.current.videoWidth;
-        const h = bgVidRef.current.videoHeight; // Assuming video height matches canvas or scales appropriately
-        const camera = worldRef.current?.camera || { x: 0, y: 0 }; // Get camera from worldRef, provide default
-        const parallaxX = camera.x * 0.3;
+        const vid = bgVidRef.current;
+        const cam = worldRef.current?.cam || { x: 0, y: 0 }; // Get camera from worldRef
 
-        // Scale video to canvas height if necessary, maintain aspect ratio
-        const scale = canvas.height / h;
-        const scaledWidth = w * scale;
+        // Calculate scaling to fit video height to canvas height (CSS pixels)
+        const vidAspect = vid.videoWidth / vid.videoHeight;
+        const scaledVidHeight = viewH;
+        const scaledVidWidth = scaledVidHeight * vidAspect;
 
-        // Calculate the effective width for tiling, considering scaling
-        const effectiveWidth = scaledWidth;
+        // Parallax factor (adjust as needed)
+        const parallaxFactor = 0.3;
+        const parallaxOffsetX = (cam.x * parallaxFactor) % scaledVidWidth;
 
-        // Draw first copy, adjusted for parallax and scaled width
-        let drawX = -parallaxX % effectiveWidth;
-        ctx.drawImage(bgVidRef.current, drawX, 0, effectiveWidth, canvas.height);
-
-        // Draw second copy to cover the seam, placed right after the first copy
-        ctx.drawImage(bgVidRef.current, drawX + effectiveWidth, 0, effectiveWidth, canvas.height);
-
-        // Optional: Draw a third copy if the parallax shift could reveal the edge
-        if (drawX + 2 * effectiveWidth < canvas.width) {
-             ctx.drawImage(bgVidRef.current, drawX + 2 * effectiveWidth, 0, effectiveWidth, canvas.height);
+        // Draw tiled video background (using CSS pixel dimensions for drawing)
+        // We need to draw enough copies to cover the screen, considering the parallax offset.
+        // Start drawing from a negative offset to handle wrapping.
+        let currentX = -parallaxOffsetX;
+        while (currentX < viewW) {
+            ctx.drawImage(vid, 0, 0, vid.videoWidth, vid.videoHeight, currentX, 0, scaledVidWidth, scaledVidHeight);
+            currentX += scaledVidWidth;
         }
 
       } else {
-        // Optional: Draw a placeholder color/image while video loads
+        // Fallback background
         ctx.fillStyle = 'black';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, viewW, viewH); // Use CSS dimensions for fallback fill
       }
-
 
       // Draw the rest of the world state from worldRef
       if (worldRef.current && gameState === 'playing') {
-        // Assuming drawWorld takes context, world state, and canvas dimensions
-        drawWorld(ctx, worldRef.current, canvas.width, canvas.height);
+        // Pass CSS pixel dimensions to drawWorld
+        drawWorld(ctx, worldRef.current, viewW, viewH);
       } else if (gameState === 'menu') {
-         // Optionally draw something specific for the menu state if needed
-         // e.g., a static frame of the video or a different background
+         // Optionally draw menu-specific background/elements
       }
-
+      // ... other gameState drawing logic ...
 
       animationFrameId = requestAnimationFrame(renderLoop);
     };
@@ -84,11 +83,8 @@ export default function GameCanvas({ gameState, setGameState, worldRef }) { // A
     return () => {
       cancelAnimationFrame(animationFrameId); // Cleanup on unmount
     };
-  }, [gameState, worldRef]); // Rerun effect if gameState or worldRef changes
-
-
-  // TODO: Initialize worldRef.current = createWorld(); // This should likely happen in the parent component (NeonSerpentGame)
-  // TODO: Setup game loop: use keyboard and joystick input, call updateWorld, then drawWorld // Input/update logic likely in parent or separate effect
+    // Update dependency array: worldRef is needed, gameState determines *what* to draw
+  }, [gameState, worldRef]);
 
   return (
     <>
@@ -99,8 +95,8 @@ export default function GameCanvas({ gameState, setGameState, worldRef }) { // A
         loop
         muted // Muted is often required for autoplay
         playsInline // Important for mobile browsers
-        style={{ display: 'none' }} // Hide the video element itself
-        // preload="auto" // Helps ensure video is ready sooner
+        style={{ display: 'none', pointerEvents: 'none' }} // Hide the video element and prevent pointer events
+        preload="auto" // Helps ensure video is ready sooner
       />
     </>
   );
