@@ -39,8 +39,7 @@ export function useJoystick(worldRef) { // Accept worldRef
     setJoystick(prev => ({ ...prev, dx, dy }));
 
     // Calculate direction vector if outside deadzone
-    const playerSpeed = worldRef.current?.player?.speed || 1.2; // Get speed or default
-    const deadzone = dynamicDeadzone(playerSpeed); // Use dynamic deadzone
+    const deadzone = JOY_DEADZONE; // Use fixed tight deadzone
 
     if (len > deadzone) {
       const snapped = snapToCardinal(dx, dy);
@@ -49,7 +48,7 @@ export function useJoystick(worldRef) { // Accept worldRef
     } else {
       setVec(null); // Inside deadzone, no direction
     }
-  }, [joystickState.active, joystickState.cx, joystickState.cy, worldRef]); // Include dependencies
+  }, [joystickState.active, joystickState.cx, joystickState.cy]); // Include dependencies
 
   const handleTouchEnd = useCallback((e) => {
     if (!joystickState.active) return;

@@ -11,6 +11,32 @@ export default function GameCanvas({ gameState, setGameState, worldRef }) {
 
   useResizeCanvas(canvasRef);
 
+  // Set random start time for video once metadata is loaded
+  useEffect(() => {
+    const video = bgVidRef.current;
+    if (!video) return;
+
+    const handleMetadata = () => {
+      if (video.duration) {
+        video.currentTime = Math.random() * video.duration;
+        console.log(`Set video start time to: ${video.currentTime.toFixed(2)}s`);
+      }
+    };
+
+    // If metadata is already loaded, set time immediately
+    if (video.readyState >= 1) { // HAVE_METADATA
+      handleMetadata();
+    } else {
+      // Otherwise, wait for the event
+      video.addEventListener('loadedmetadata', handleMetadata);
+    }
+
+    // Cleanup function
+    return () => {
+      video.removeEventListener('loadedmetadata', handleMetadata);
+    };
+  }, []); // Run only once on mount
+
   // Control background video playback based on gameState
   useEffect(() => {
     const video = bgVidRef.current;
@@ -55,8 +81,10 @@ export default function GameCanvas({ gameState, setGameState, worldRef }) {
       // --- START BACKGROUND DRAWING LOGIC (Always runs) ---
       if (bgVidRef.current?.readyState >= 2) { // HAVE_CURRENT_DATA or more
         const vid = bgVidRef.current;
-        // Use default camera position centered in the world if worldRef doesn't exist yet
-        const cam = worldRef.current?.cam || { x: WORLD_SIZE / 2, y: WORLD_SIZE / 2 };
+        // Use player spawn position (world center) if worldRef doesn't exist yet
+        // This prevents camera jump when game starts.
+        const initialCamPos = { x: WORLD_SIZE / 2, y: WORLD_SIZE / 2 };
+        const cam = worldRef.current?.cam || initialCamPos;
 
         ctx.save();
         ctx.filter = 'blur(2px) brightness(0.7) saturate(0.9)';
@@ -68,25 +96,30 @@ export default function GameCanvas({ gameState, setGameState, worldRef }) {
         const sourceViewW = viewW * invScale;
         const sourceViewH = viewH * invScale;
         
-        // Top-left corner of the visible area in *video source* pixels, considering parallax
-        // Center the view first, then apply parallax relative to the center of the world
-        const parallaxX = (cam.x - WORLD_SIZE / 2) * BG_PARALLAX;
-        const parallaxY = (cam.y - WORLD_SIZE / 2) * BG_PARALLAX;
+        // Target camera position (center on player head if possible, else use initial pos)
+        const targetCamX = worldRef.current?.player?.segs[0]?.x ?? initialCamPos.x;
+        const targetCamY = worldRef.current?.player?.segs[0]?.y ?? initialCamPos.y;
+
+        // Calculate source x/y (sx, sy) based on the *current* camera position,
+        // but apply parallax based on the offset from the *target* center.
+        // This centers the non-parallax view on the current camera pos.
+        let sx = cam.x - sourceViewW / 2;
+        let sy = cam.y - sourceViewH / 2;
+
+        // Add parallax based on how far the camera *is* from its target center
+        sx += (cam.x - targetCamX) * BG_PARALLAX;
+        sy += (cam.y - targetCamY) * BG_PARALLAX;
         
-        // Calculate source x/y (sx, sy) based on camera, parallax, and ensuring it's centered
-        let sx = (cam.x + parallaxX - sourceViewW / 2);
-        let sy = (cam.y + parallaxY - sourceViewH / 2);
-        
-        // Optional: Clamp sx/sy to prevent drawing outside the video bounds if needed
-        // sx = Math.max(0, Math.min(vid.videoWidth - sourceViewW, sx));
-        // sy = Math.max(0, Math.min(vid.videoHeight - sourceViewH, sy));
+        // Clamp sx/sy to prevent drawing outside the video bounds
+        sx = Math.max(0, Math.min(vid.videoWidth - sourceViewW, sx));
+        sy = Math.max(0, Math.min(vid.videoHeight - sourceViewH, sy));
         // Or allow wrapping/tiling at edges if preferred (more complex)
         
         // --- Draw the calculated source portion to fill the canvas --- 
         ctx.drawImage(
           vid,
           sx, sy, sourceViewW, sourceViewH, // Source rectangle (part of the video)
-          0, 0, viewW, viewH               // Destination rectangle (entire canvas view)
+          0, 0, canvas.width, canvas.height // Destination rectangle (fill entire canvas buffer)
         );
 
         ctx.restore();
@@ -120,13 +153,18 @@ export default function GameCanvas({ gameState, setGameState, worldRef }) {
       <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }} />
       <video
         ref={bgVidRef}
-        src="/cave_city.mp4"
         loop
         muted
         playsInline
         style={{ display: 'none', pointerEvents: 'none' }}
         preload="auto"
-      />
+      >
+        {/* List AV1 first for efficiency */}
+        <source src="/cave_city.mp4" type="video/mp4; codecs=av01" /> 
+        {/* H.264 fallback (compatibility version) */}
+        <source src="/cave_city_h264_compat.mp4" type="video/mp4; codecs=avc1" /> 
+        Your browser does not support the video tag. 
+      </video>
     </>
   );
 }

@@ -10,20 +10,40 @@ export function useKeyboard() {
   const [dir, setDir] = useState({ x: 1, y: 0 }); // Start facing right
 
   const updateDir = useCallback((currentKeys) => {
-    let dx = 0, dy = 0;
-    if (currentKeys['ArrowUp']    || currentKeys['w']) dy = -1;
-    if (currentKeys['ArrowDown']  || currentKeys['s']) dy =  1;
+    let dx = 0;
+    let dy = 0;
+
+    // Check horizontal keys
     if (currentKeys['ArrowLeft']  || currentKeys['a']) dx = -1;
     if (currentKeys['ArrowRight'] || currentKeys['d']) dx =  1;
 
-    // Prioritize vertical movement if both directions are pressed simultaneously
-    // (Matches original behavior where vertical keys override horizontal)
-    if (dy !== 0) dx = 0;
+    // Check vertical keys
+    if (currentKeys['ArrowUp']    || currentKeys['w']) dy = -1;
+    if (currentKeys['ArrowDown']  || currentKeys['s']) dy =  1;
 
-    if (dx !== 0 || dy !== 0) {
-      setDir({ x: dx, y: dy });
+    // Normalize if diagonal
+    if (dx !== 0 && dy !== 0) {
+      const magnitude = Math.sqrt(dx * dx + dy * dy);
+      // Avoid division by zero, though magnitude should be sqrt(2) here
+      if (magnitude > 0) { 
+        dx /= magnitude;
+        dy /= magnitude;
+        // Optional: Round to avoid floating point issues if needed, 
+        // but for unit vector it might be okay. 
+        // dx = Math.round(dx * 100) / 100;
+        // dy = Math.round(dy * 100) / 100;
+      }
     }
-    // If no direction keys are pressed, dir remains the last valid direction
+
+    // Update direction if it has changed
+    // This allows dir to become {x: 0, y: 0} if no keys are pressed
+    setDir(prevDir => {
+      if (prevDir.x !== dx || prevDir.y !== dy) {
+        return { x: dx, y: dy };
+      }
+      return prevDir; // No change
+    });
+
   }, []);
 
   useEffect(() => {

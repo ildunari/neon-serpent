@@ -2,8 +2,8 @@
 
 /*  ----------  background constants  ----------  */
 // path is relative to the public/ folder
-export const BG_SRC = '/cave-city.mp4'; // Using video now, keep var name for potential future use? Or remove? Let's keep for now.
-export const BG_SCALE = 1.5; // Changed from 0.25 to 1.5 for zoom-in
+export const BG_SRC = '/cave_city_h264.mp4'; // Use the H.264 encoded version
+export const BG_SCALE = 0.25; // Reduced zoom from 1.5 to 1.2 -- Reverted to 0.25
 export const BG_PARALLAX = 0.3; // Parallax factor for background scrolling
 
 /*  ----------  world constants  ----------  */
@@ -12,7 +12,7 @@ export const INITIAL_AI   = 6;
 export const TICK_MS      = 1000 / 60;          // 60 fps logic
 export const CAM_SMOOTH   = 0.08;
 export const ORB_COUNT    = 350;
-export const TURN_COOLDOWN_MS = 100;   // minimum interval (ms) between allowed turns (keyboard)
+export const TURN_COOLDOWN_MS = 60;   // minimum interval (ms) between allowed turns (keyboard)
 export const SELF_GAP         = 8;     // ignore first N segments for player self‑collision (DEPRECATED? see playerSkip)
 export const TOUCH_DEADZONE_PX = 16;   // min drag distance before a touch turn registers (DEPRECATED? see JOY_DEADZONE)
 export const ENEMY_NECK_GAP   = 4;     // ignore first N segments for AI necks

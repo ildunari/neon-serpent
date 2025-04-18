@@ -37,7 +37,7 @@
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  background-color: rgba(0, 0, 0, 0.7); /* Semi-transparent background */
+  background-color: rgba(0, 0, 0, 0.95); /* Semi-transparent background */
   color: white;
   z-index: 10; /* Ensure overlays are above the canvas */
   box-sizing: border-box; /* Include padding/border in element's total width/height */

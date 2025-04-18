@@ -8,8 +8,8 @@ import MenuOverlay from './components/MenuOverlay';
 import ControlsOverlay from './components/ControlsOverlay';
 import { createWorld, updateWorld } from './world';
 import { useKeyboard, useJoystick } from './input'; // Import input hooks
-import { TURN_COOLDOWN_MS, JOY_TURN_COOLDOWN_MS } from './constants'; // Import cooldown constants
-import { willHitTail } from './utils/math'; // Import turn safety helper
+import { TURN_COOLDOWN_MS, JOY_TURN_COOLDOWN_MS, WORLD_SIZE } from './constants'; // Import cooldown constants & WORLD_SIZE
+import { willHitTail, playerSkip } from './utils/math'; // Import turn safety helper & playerSkip
 
 // Define menu options and controls info
 const menuOptions = ['Start Game', 'Controls', 'Restart Game'];
@@ -23,11 +23,14 @@ const controlsInfo = [
 
 export default function NeonSerpentGame() {
   const [gameState, setGameState] = useState('menu'); // Default to 'menu'
+  console.log(`Rendering NeonSerpentGame with gameState: ${gameState}`); // Added log
   const [menuIndex, setMenuIndex] = useState(0);
+  const [isGameInProgress, setIsGameInProgress] = useState(false); // Track if game is resumable
   const [showControls, setShowControls] = useState(false);
   const worldRef = useRef(null); // Initialize as null, create world on start
   const lastTurnRef = useRef(0); // Track last turn time
   const canvasSizeRef = useRef({ width: window.innerWidth, height: window.innerHeight }); // Track canvas size
+  const canSelectMenu = useRef(false); // Ref to prevent initial menu selection
 
   // Initialize input hooks
   const { keys, dir: keyDir } = useKeyboard();
@@ -39,7 +42,16 @@ export default function NeonSerpentGame() {
       canvasSizeRef.current = { width: window.innerWidth, height: window.innerHeight };
     };
     window.addEventListener('resize', handleResize);
+    handleResize(); // <-- Add this initial call
     return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Allow menu selection only after a short delay to prevent initial phantom space press
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      canSelectMenu.current = true;
+    }, 100); // 100ms delay, adjust if needed
+    return () => clearTimeout(timer); // Cleanup timer on unmount
   }, []);
 
   // Initialize world only when starting the game
@@ -48,7 +60,42 @@ export default function NeonSerpentGame() {
     worldRef.current = createWorld();
     lastTurnRef.current = 0; // Reset turn timer
     setShowControls(false);
+    setIsGameInProgress(true); // Mark game as in progress
     setGameState('playing');
+  }, []);
+
+  // Add this useEffect to snap camera when entering 'playing' state
+  useEffect(() => {
+    if (gameState === 'playing' && worldRef.current) {
+      const { width, height } = canvasSizeRef.current;
+      // Ensure dimensions and world/player refs are valid before calculation
+      if (width && height && worldRef.current.player?.segs?.[0]) {
+        const p = worldRef.current.player;
+        worldRef.current.cam.x = p.segs[0].x - width  * 0.5;
+        worldRef.current.cam.y = p.segs[0].y - height * 0.5;
+        // console.log('Camera snapped on entering playing state.'); // Optional: for debugging
+      }
+    }
+  }, [gameState]); // Re-run only when gameState changes
+
+  // Define menu/controls handlers *before* the effect that uses them
+  const handleMenuSelect = useCallback((idx, currentOptions) => {
+    // We need currentOptions passed here now as it's dynamic
+    setMenuIndex(idx);
+    const action = currentOptions[idx]; // Use the passed options array
+    console.log(`Menu action selected: ${action}`); // Debug log
+
+    if (action === 'Resume') {
+      setGameState('playing');
+    } else if (action === 'Start Game' || action === 'Restart Game') {
+      startGame(); // This sets isGameInProgress = true
+    } else if (action === 'Controls') {
+      setShowControls(true);
+    }
+  }, [startGame]); // startGame is a dependency
+
+  const handleControlsBack = useCallback(() => {
+    setShowControls(false);
   }, []);
 
   // Game Loop: Update world state
@@ -77,15 +124,24 @@ export default function NeonSerpentGame() {
 
         if (desiredDir && now - lastTurnRef.current > turnCooldown) {
           const player = worldRef.current.player;
-          // Check if the turn is safe (not immediate 180, not into own tail)
-          const isSafeTurn = !(desiredDir.x === -player.vx && desiredDir.y === -player.vy);
-          // TODO: Add willHitTail check if needed, requires passing world state
-          // const isSafeTurn = !(...) && !willHitTail(player.segs[0].x + desiredDir.x * player.speed, player.segs[0].y + desiredDir.y * player.speed, player.segs, playerSkip(player));
+          const head = player.segs[0];
 
-          if (isSafeTurn) {
-            player.vx = desiredDir.x;
-            player.vy = desiredDir.y;
+          // Check if trying to turn 180 degrees
+          const isOpposite = (desiredDir.x === -player.dir.x && desiredDir.y === -player.dir.y);
+
+          // Calculate next head position for collision check
+          const nextX = (head.x + desiredDir.x * player.speed + WORLD_SIZE) % WORLD_SIZE;
+          const nextY = (head.y + desiredDir.y * player.speed + WORLD_SIZE) % WORLD_SIZE;
+
+          // Check if the turn would bite the tail/neck
+          const wouldBite = willHitTail(nextX, nextY, player.segs, playerSkip(player));
+
+          if (!isOpposite && !wouldBite) {
+            // Update player direction directly
+            player.dir.x = desiredDir.x;
+            player.dir.y = desiredDir.y;
             lastTurnRef.current = now;
+            // console.log(`Turn accepted: ${desiredDir.x}, ${desiredDir.y}`); // Optional: for debugging
             // Add to lastMoves if that debugging feature is desired
           }
         }
@@ -115,44 +171,49 @@ export default function NeonSerpentGame() {
     // Pass canvasSizeRef.current if needed? No, it's read inside the loop.
   }, [gameState, keyDir, joyVec, joystickState.active]); // Removed startGame from deps
 
-  // Moved useCallback hooks before useEffect that uses them
-  const handleMenuSelect = useCallback((idx) => {
-    setMenuIndex(idx);
-    const action = menuOptions[idx];
-    if (action === 'Start Game' || action === 'Restart Game') {
-      startGame(); // Call startGame here
-    } else if (action === 'Controls') {
-      setShowControls(true);
-    }
-  }, [startGame]); // startGame is a dependency
-
-  const handleControlsBack = useCallback(() => {
-    setShowControls(false);
-  }, []);
-
-  // Menu Navigation and Selection
+  // Menu Navigation and Selection + Global Key Handlers
   useEffect(() => {
+    // Define dynamic menu options based on game state
+    const currentMenuOptions = isGameInProgress
+      ? ['Resume', 'Controls', 'Restart Game']
+      : ['Start Game', 'Controls', 'Restart Game'];
+
     const handleKeyDown = (e) => {
+      // console.log(`[KeyDown] Key: ${e.key}, GameState: ${gameState}, InProgress: ${isGameInProgress}`); // DEBUG
+
       if (gameState === 'menu' && !showControls) {
         if (e.key === 'ArrowUp' || e.key === 'w') {
-          setMenuIndex(prev => (prev - 1 + menuOptions.length) % menuOptions.length);
+          setMenuIndex(prev => (prev - 1 + currentMenuOptions.length) % currentMenuOptions.length);
         } else if (e.key === 'ArrowDown' || e.key === 's') {
-          setMenuIndex(prev => (prev + 1) % menuOptions.length);
+          setMenuIndex(prev => (prev + 1) % currentMenuOptions.length);
         } else if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault(); // Prevent spacebar scrolling
-          // Only call startGame from here or handleMenuSelect
-          handleMenuSelect(menuIndex);
+          e.preventDefault();
+          if (canSelectMenu.current) {
+            handleMenuSelect(menuIndex, currentMenuOptions);
+          }
+        } else if (e.key === 'Escape' && isGameInProgress) {
+          // Add Escape key behavior for menu state: Resume if possible
+          e.preventDefault();
+          setGameState('playing'); // Resume the game
         }
-      } else if (gameState === 'playing' && (e.key === 'Escape' || e.key === ' ')) {
-        e.preventDefault();
-        setGameState('paused'); // Simple pause example
-      } else if (gameState === 'paused' && (e.key === 'Escape' || e.key === ' ')) {
-        e.preventDefault();
-        setGameState('playing');
+      } else if (gameState === 'playing') { // Handle keys during gameplay
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setGameState('menu'); // Go back to menu (will show Resume option)
+        } else if (e.key === ' ') { // Space still uses simple pause
+          e.preventDefault();
+          setGameState('paused');
+        }
+      } else if (gameState === 'paused') { // Simple pause state
+        if (e.key === 'Escape' || e.key === ' ') {
+          e.preventDefault();
+          setGameState('playing'); // Resume from simple pause
+        }
       } else if (gameState === 'gameover' && (e.key === 'Enter' || e.key === ' ')) {
         e.preventDefault();
-        setGameState('menu'); // Return to menu
-        setMenuIndex(0); // Reset menu selection
+        setIsGameInProgress(false); // Game ended, no longer resumable
+        setGameState('menu');
+        setMenuIndex(0);
       } else if (showControls && e.key === 'Escape') {
         handleControlsBack();
       }
@@ -160,7 +221,12 @@ export default function NeonSerpentGame() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [gameState, menuIndex, showControls, handleMenuSelect, handleControlsBack]); // Added handleMenuSelect/handleControlsBack
+  }, [gameState, menuIndex, showControls, handleMenuSelect, handleControlsBack, isGameInProgress]);
+
+  // Determine current menu options for rendering
+  const currentMenuOptions = isGameInProgress
+    ? ['Resume', 'Controls', 'Restart Game']
+    : ['Start Game', 'Controls', 'Restart Game'];
 
   return (
     <div className="game-container"> {/* Add a container div */}
@@ -172,15 +238,16 @@ export default function NeonSerpentGame() {
         <MenuOverlay
           menuIndex={menuIndex}
           setMenuIndex={setMenuIndex}
-          onSelect={handleMenuSelect} // Pass the memoized handler
-          menuOptions={menuOptions} // Pass options
+          onSelect={(idx) => handleMenuSelect(idx, currentMenuOptions)} // Pass options to handler
+          menuOptions={currentMenuOptions} // Pass dynamic options
         />
       )}
       {showControls && (
         <ControlsOverlay onBack={handleControlsBack} controlsInfo={controlsInfo} /> // Pass info
       )}
+      {/* Restored simple pause overlay with updated text */}
       {gameState === 'paused' && (
-        <div className="overlay simple-overlay">PAUSED (Press Esc/Space)</div>
+        <div className="overlay simple-overlay">PAUSED (Press Esc/Space to Resume)</div>
       )}
       {gameState === 'gameover' && (
         <div className="overlay simple-overlay">
