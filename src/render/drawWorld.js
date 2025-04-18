@@ -6,8 +6,10 @@ import { WORLD_SIZE } from '../constants'; // Assuming BG_SCALE is handled elsew
  * @param {CanvasRenderingContext2D} ctx - canvas context
  * @param {object} world - current world state { orbs, snakes, particles, player, cam }
  * Note: Background drawing is now handled in GameCanvas.jsx
+ * @param {number} [playerSkipCount=0] - Number of safe segments for the player snake
+ * @param {number} [fps=0] - Current frames per second
  */
-export function drawWorld(ctx, world) {
+export function drawWorld(ctx, world, playerSkipCount = 0, fps = 0) {
   // Background is drawn in GameCanvas.jsx, so we only draw entities and HUD here.
 
   // Save context state before applying transformations/styles
@@ -24,7 +26,13 @@ export function drawWorld(ctx, world) {
   // Ensure entities have draw methods that accept (ctx, world.cam)
   world.orbs.forEach(o => o.draw(ctx, world.cam));
   world.particles.forEach(p => p.draw(ctx, world.cam));
-  world.snakes.forEach(s => s.draw(ctx, world.cam));
+  world.snakes.forEach(s => {
+    if (s.isPlayer) {
+      s.draw(ctx, world.cam, playerSkipCount);
+    } else {
+      s.draw(ctx, world.cam);
+    }
+  });
 
   /* Draw HUD */
   // Use fixed position for HUD elements
@@ -32,8 +40,12 @@ export function drawWorld(ctx, world) {
   ctx.font = '16px monospace';
   ctx.textAlign = 'left'; // Reset alignment
   ctx.shadowBlur = 0; // Ensure no leftover shadow from snake drawing
+  // Draw Score
   ctx.fillText(`Score: ${world.player.score}`, 12, 20);
-  // Add other HUD elements as needed (e.g., length, high score)
+  // Draw FPS next to score
+  ctx.textAlign = 'right'; // Align FPS to the right edge
+  ctx.fillText(`FPS: ${fps}`, ctx.canvas.clientWidth - 12, 20); // Draw near top-right (CSS coordinates)
+  ctx.textAlign = 'left'; // Reset alignment for potential future HUD elements
 
   // Restore context state
   ctx.restore();

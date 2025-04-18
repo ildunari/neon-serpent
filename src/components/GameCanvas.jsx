@@ -5,10 +5,16 @@ import { drawWorld } from '../render/drawWorld';
 // Import BG_SCALE, BG_PARALLAX, and WORLD_SIZE from constants
 import { BG_SCALE, BG_PARALLAX, WORLD_SIZE } from '../constants';
 
-export default function GameCanvas({ gameState, worldRef }) {
+export default function GameCanvas({ gameState, worldRef, playerSkipCount }) {
   const canvasRef = useRef(null);
   const bgVidRef = useRef(null);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  // --- FPS State & Ref ---
+  const [fps, setFps] = useState(0); // Keep state for potential other uses
+  const frameCountRef = useRef(0);
+  const lastFpsUpdateRef = useRef(performance.now());
+  const currentFpsRef = useRef(0); // <-- Ref to hold the latest calculated FPS
+  // --- End FPS State & Ref ---
 
   useResizeCanvas(canvasRef);
 
@@ -63,7 +69,20 @@ export default function GameCanvas({ gameState, worldRef }) {
     const ctx = canvas?.getContext('2d');
     let animationFrameId;
 
-    const gameLoop = () => {
+    const gameLoop = (timestamp) => { // timestamp is provided by requestAnimationFrame
+      // Calculate FPS
+      frameCountRef.current++;
+      const now = timestamp; // Use the timestamp from requestAnimationFrame
+      const delta = now - lastFpsUpdateRef.current;
+
+      if (delta >= 1000) { // Update FPS calculation every second
+        const calculatedFps = Math.round((frameCountRef.current * 1000) / delta);
+        setFps(calculatedFps); // Update state (for potential future use)
+        currentFpsRef.current = calculatedFps; // <-- Update the ref immediately
+        lastFpsUpdateRef.current = now;
+        frameCountRef.current = 0;
+      }
+
       // if (gameState !== 'playing') return; // Loop control handled in parent
 
       // Calculate view dimensions in CSS pixels using clientWidth/clientHeight
@@ -128,8 +147,8 @@ export default function GameCanvas({ gameState, worldRef }) {
 
       // Draw the game world entities only when playing
       if (gameState === 'playing' && worldRef.current) {
-        console.log('>>> Drawing world. State:', gameState, 'World:', worldRef.current); // DEBUG LOG
-        drawWorld(ctx, worldRef.current);
+        // Pass the current FPS value from the ref
+        drawWorld(ctx, worldRef.current, playerSkipCount, currentFpsRef.current);
 
         // Debug: Draw bounding boxes
         // ... existing code ...
@@ -140,12 +159,19 @@ export default function GameCanvas({ gameState, worldRef }) {
       animationFrameId = requestAnimationFrame(gameLoop);
     };
 
-    gameLoop(); // Start the loop
+    // Reset FPS counter state when effect re-runs or unmounts
+    frameCountRef.current = 0;
+    lastFpsUpdateRef.current = performance.now();
+    currentFpsRef.current = 0; // <-- Reset the ref
+    setFps(0);
+
+    gameLoop(performance.now()); // Start the loop with initial timestamp
 
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [gameState, worldRef]); // Dependencies remain the same
+    // Dependencies are correct, no need to add refs here
+  }, [gameState, worldRef, playerSkipCount]);
 
   return (
     <>

@@ -26,7 +26,7 @@ export default class Snake {
     // control the speed of the eat wave animation (smaller = slower)
     this.eatSpeed = 0.5;
     this.trailPoints = []; // Add array to store recent head positions for trail effect
-    this.maxTrailPoints = 5; // How many points to store for the trail
+    this.maxTrailPoints = 3; // Reduced from 5
   }
 
   /* AI steering */
@@ -135,7 +135,7 @@ export default class Snake {
 
   length() { return this.segs.length; }
 
-  draw(ctx, cam) {
+  draw(ctx, cam, skipCount = 0) {
     if (this.dead) return;
 
     ctx.lineCap = 'round';
@@ -143,18 +143,19 @@ export default class Snake {
 
     // --- Player Specific Enhancements ---
     if (this.isPlayer) {
-      // 1. Trail Effect
-      const maxTrailSize = 4;
+      // 1. Trail Effect (Optimized)
+      const maxTrailSize = 3; // Slightly reduced size to match fewer points
       this.trailPoints.forEach((p, index) => {
         const trailProgress = index / this.maxTrailPoints;
         const sx = p.x - cam.x;
         const sy = p.y - cam.y;
         const trailSize = maxTrailSize * (1 - trailProgress);
-        const trailAlpha = 0.5 * (1 - trailProgress);
+        const trailAlpha = 0.3 * (1 - trailProgress); // Reduced alpha
 
         ctx.fillStyle = `rgba(0, 234, 255, ${trailAlpha})`; // Player color with alpha
-        ctx.shadowBlur = 5 * (1 - trailProgress); // Fading glow
-        ctx.shadowColor = `rgba(0, 234, 255, ${trailAlpha})`;
+        // --- Optimization: Reduce trail glow ---
+        ctx.shadowBlur = 3 * (1 - trailProgress); // Reduced from 5
+        ctx.shadowColor = `rgba(0, 234, 255, ${trailAlpha / 2})`; // Dimmer glow
 
         ctx.beginPath();
         ctx.arc(sx, sy, trailSize, 0, Math.PI * 2);
@@ -167,8 +168,9 @@ export default class Snake {
     const baseColor = this.glowFrames > 0 ? '#ffffff' : this.color;
     const outlineColor = '#ffffff'; // White outline for contrast
     const playerGlowColor = '#ffff00'; // Bright yellow glow for player
-    const playerGlowBlur = 12;
-    const aiGlowBlur = 10;
+    // --- Adjusted glow blur values ---
+    const playerGlowBlur = 9;  // User requested value (was 6, originally 12)
+    // AI Glow removed (aiGlowBlur not needed here)
 
     for (let i = 0; i < this.segs.length - 1; i++) {
       const p1 = this.segs[i], p2 = this.segs[i + 1];
@@ -186,18 +188,41 @@ export default class Snake {
       const currentWidth = baseW * (1 + swellFactor * 0.5);
       const isPulsing = swellFactor > 0.01;
 
-      // --- Determine Colors and Glow based on state/type ---
-      const segmentColor = isPulsing ? '#ffffff' : baseColor;
-      const segmentShadowColor = this.isPlayer ? playerGlowColor :
-                                 (isPulsing ? '#ffffff' : baseColor);
-      const segmentShadowBlur = this.isPlayer ? playerGlowBlur :
-                                  (isPulsing ? 25 : aiGlowBlur);
+      // --- Determine Colors and Glow (AI Glow Removed) ---
+      let segmentStrokeStyle;
+      let segmentShadowColor = 'transparent';
+      let segmentShadowBlur = 0;
 
-      // --- Draw Outline (Player Only for now) ---
+      const isSafePlayerSegment = this.isPlayer && skipCount > 0 && i < skipCount;
+
+      if (isSafePlayerSegment) {
+        segmentStrokeStyle = '#0099aa';
+        segmentShadowColor = '#0099aa';
+        segmentShadowBlur = 3;
+      } else if (this.isPlayer) {
+        // Player (dangerous segments) or pulsing player
+        segmentStrokeStyle = isPulsing ? '#ffffff' : baseColor;
+        segmentShadowColor = playerGlowColor;
+        // Use the adjusted playerGlowBlur
+        segmentShadowBlur = isPulsing ? playerGlowBlur + 4 : playerGlowBlur;
+      } else {
+        // AI Snake (No Glow except pulsing)
+        segmentStrokeStyle = isPulsing ? '#ffffff' : baseColor;
+        if (isPulsing) {
+          segmentShadowColor = '#ffffff'; // White glow when pulsing
+          segmentShadowBlur = 15; // Pulsing AI glow (keep this intense for feedback)
+        } else {
+          // No glow/shadow for standard AI segments
+          segmentShadowColor = 'transparent';
+          segmentShadowBlur = 0;
+        }
+      }
+
+      // --- Draw Outline (Player Only) ---
       if (this.isPlayer) {
         ctx.strokeStyle = outlineColor;
-        ctx.lineWidth = currentWidth + 2; // Slightly thicker for outline
-        ctx.shadowBlur = 0; // No glow for outline itself
+        ctx.lineWidth = currentWidth + 2;
+        ctx.shadowBlur = 0;
         ctx.beginPath();
         ctx.moveTo(sx1, sy1);
         ctx.lineTo(sx2, sy2);
@@ -205,7 +230,7 @@ export default class Snake {
       }
 
       // --- Draw Main Segment with Glow ---
-      ctx.strokeStyle = segmentColor;
+      ctx.strokeStyle = segmentStrokeStyle;
       ctx.lineWidth = currentWidth;
       ctx.shadowBlur = segmentShadowBlur;
       ctx.shadowColor = segmentShadowColor;
@@ -216,18 +241,20 @@ export default class Snake {
     }
     // --- End Snake Body Segments ---
 
-    // --- Draw Head ---
+    // --- Draw Head (AI Glow Removed) ---
     if (this.segs.length > 0) {
       const headSeg = this.segs[0];
       const sx = headSeg.x - cam.x, sy = headSeg.y - cam.y;
       let headRadius = 5 + this.length() / 30;
       const headColor = this.glowFrames > 0 ? '#ffffff' : this.color;
-      const headShadowColor = this.isPlayer ? playerGlowColor : headColor;
-      let headShadowBlur = this.isPlayer ? playerGlowBlur + 5 : aiGlowBlur; // Slightly stronger player head glow
+      let headShadowColor = 'transparent';
+      let headShadowBlur = 0;
 
-      // Player Head Specifics
       if (this.isPlayer) {
-        headRadius += 1; // Slightly larger player head
+        headRadius += 1;
+        headShadowColor = playerGlowColor;
+        // Use adjusted playerGlowBlur for head
+        headShadowBlur = playerGlowBlur + 2;
 
         // Draw Outline
         ctx.strokeStyle = outlineColor;
@@ -236,6 +263,10 @@ export default class Snake {
         ctx.beginPath();
         ctx.arc(sx, sy, headRadius + 1, 0, Math.PI * 2);
         ctx.stroke();
+      } else if (this.glowFrames > 0) {
+         // AI head pulsing white when recently eaten (No colored glow)
+         headShadowColor = '#ffffff'; // Pulse white
+         headShadowBlur = 15; // Keep pulse intense
       }
 
       // Draw Main Head Fill with Glow
@@ -246,10 +277,11 @@ export default class Snake {
       ctx.arc(sx, sy, headRadius, 0, Math.PI * 2);
       ctx.fill();
 
-      // Player Eyes
+      // Player Eyes (Reverted Shadow Blur)
       if (this.isPlayer) {
         ctx.fillStyle = '#ffffff'; // White eyes
-        ctx.shadowBlur = 3;
+        // --- Reverted eye glow ---
+        ctx.shadowBlur = 3; // Reverted from 1
         ctx.shadowColor = '#ffffff';
         const angle = Math.atan2(this.dir.y, this.dir.x);
         const eyeDist = headRadius * 0.5;
