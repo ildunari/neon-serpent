@@ -7,12 +7,11 @@ import GameCanvas from './components/GameCanvas';
 import MenuOverlay from './components/MenuOverlay';
 import ControlsOverlay from './components/ControlsOverlay';
 import { createWorld, updateWorld } from './world';
-import { useKeyboard, useJoystick } from './input'; // Import input hooks
+import { useKeyboard, useJoystick } from './input'; // Import input hooks from barrel file
 import { TURN_COOLDOWN_MS, JOY_TURN_COOLDOWN_MS, WORLD_SIZE } from './constants'; // Import cooldown constants & WORLD_SIZE
 import { willHitTail, playerSkip } from './utils/math'; // Import turn safety helper & playerSkip
 
 // Define menu options and controls info
-const menuOptions = ['Start Game', 'Controls', 'Restart Game'];
 const controlsInfo = [
   { label: 'Move', icons: ['/w.png', '/a.png', '/s.png', '/d.png'], fallback: 'WASD' },
   { label: 'Move', icons: ['/up.png', '/left.png', '/down.png', '/right.png'], fallback: 'Arrow Keys' },
@@ -26,6 +25,7 @@ export default function NeonSerpentGame() {
   console.log(`Rendering NeonSerpentGame with gameState: ${gameState}`); // Added log
   const [menuIndex, setMenuIndex] = useState(0);
   const [isGameInProgress, setIsGameInProgress] = useState(false); // Track if game is resumable
+  const [playerSkipCount, setPlayerSkipCount] = useState(0); // <--- Add state for skip count
   const [showControls, setShowControls] = useState(false);
   const worldRef = useRef(null); // Initialize as null, create world on start
   const lastTurnRef = useRef(0); // Track last turn time
@@ -33,8 +33,8 @@ export default function NeonSerpentGame() {
   const canSelectMenu = useRef(false); // Ref to prevent initial menu selection
 
   // Initialize input hooks
-  const { keys, dir: keyDir } = useKeyboard();
-  const { joystickState, vec: joyVec } = useJoystick(worldRef); // Pass worldRef
+  const { dir: keyDir } = useKeyboard();
+  const { joystickState, vec: joyVec } = useJoystick();
 
   // Update canvas size ref on resize (could also get from useResizeCanvas if needed)
   useEffect(() => {
@@ -126,9 +126,6 @@ export default function NeonSerpentGame() {
           const player = worldRef.current.player;
           const head = player.segs[0];
 
-          // Check if trying to turn 180 degrees
-          const isOpposite = (desiredDir.x === -player.dir.x && desiredDir.y === -player.dir.y);
-
           // Calculate next head position for collision check
           const nextX = (head.x + desiredDir.x * player.speed + WORLD_SIZE) % WORLD_SIZE;
           const nextY = (head.y + desiredDir.y * player.speed + WORLD_SIZE) % WORLD_SIZE;
@@ -136,7 +133,8 @@ export default function NeonSerpentGame() {
           // Check if the turn would bite the tail/neck
           const wouldBite = willHitTail(nextX, nextY, player.segs, playerSkip(player));
 
-          if (!isOpposite && !wouldBite) {
+          // Update direction if it wouldn't bite the tail (180 turns are now allowed if safe)
+          if (!wouldBite) {
             // Update player direction directly
             player.dir.x = desiredDir.x;
             player.dir.y = desiredDir.y;
@@ -150,6 +148,15 @@ export default function NeonSerpentGame() {
         // Update world logic - pass current canvas CSS dimensions
         const { width: viewW, height: viewH } = canvasSizeRef.current;
         worldRef.current = updateWorld(worldRef.current, dt, viewW, viewH);
+
+        // --- Calculate player skip count ---
+        if (worldRef.current.player) {
+          const skipCount = playerSkip(worldRef.current.player);
+          setPlayerSkipCount(skipCount); // Update state
+        } else {
+          setPlayerSkipCount(0); // Reset if player doesn't exist
+        }
+        // --- End Skip Count Calculation ---
 
         // Check for game over
         if (worldRef.current.player.dead) {
@@ -169,7 +176,7 @@ export default function NeonSerpentGame() {
       cancelAnimationFrame(animationFrameId);
     };
     // Pass canvasSizeRef.current if needed? No, it's read inside the loop.
-  }, [gameState, keyDir, joyVec, joystickState.active]); // Removed startGame from deps
+  }, [gameState, keyDir, joyVec, joystickState.active]); // Correct dependency array
 
   // Menu Navigation and Selection + Global Key Handlers
   useEffect(() => {
@@ -231,7 +238,11 @@ export default function NeonSerpentGame() {
   return (
     <div className="game-container"> {/* Add a container div */}
       {/* Always render canvas, but drawing depends on state */}
-      <GameCanvas gameState={gameState} setGameState={setGameState} worldRef={worldRef} />
+      <GameCanvas
+        gameState={gameState}
+        worldRef={worldRef}
+        playerSkipCount={playerSkipCount} // <--- Pass skip count as prop
+      />
 
       {/* Conditional Overlays */}
       {gameState === 'menu' && !showControls && (
@@ -245,15 +256,29 @@ export default function NeonSerpentGame() {
       {showControls && (
         <ControlsOverlay onBack={handleControlsBack} controlsInfo={controlsInfo} /> // Pass info
       )}
-      {/* Restored simple pause overlay with updated text */}
+      {/* Restored simple pause overlay with updated text and onClick */}
       {gameState === 'paused' && (
-        <div className="overlay simple-overlay">PAUSED (Press Esc/Space to Resume)</div>
+        <div
+          className="overlay simple-overlay tappable-overlay"
+          onClick={() => setGameState('playing')} // Add onClick to resume
+        >
+          <h2>Paused</h2>
+          <p>Tap/Click or press Space/Esc to Resume</p>
+        </div>
       )}
+      {/* Add Game Over overlay with restart logic */}
       {gameState === 'gameover' && (
-        <div className="overlay simple-overlay">
-          GAME OVER<br />
-          Score: {worldRef.current?.player?.score ?? 0}<br />
-          (Press Enter/Space)
+        <div
+          className="overlay simple-overlay tappable-overlay"
+          onClick={() => { // Add onClick to restart
+            setIsGameInProgress(false);
+            setGameState('menu');
+            setMenuIndex(0);
+          }}
+        >
+          <h2>Game Over</h2>
+          <p>Score: {worldRef.current?.player?.score ?? 0}</p> {/* Display score */}
+          <p>Tap/Click or press Enter/Space to Restart</p>
         </div>
       )}
       {/* Render Joystick UI only when playing and joystick is active */}

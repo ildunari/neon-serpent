@@ -23,7 +23,7 @@ export default function MenuOverlay({ menuIndex, setMenuIndex, onSelect, menuOpt
             </button>
           ))}
         </div>
-        <p className="hint">Use Arrow Keys or WASD to navigate, Enter or Space to select.</p>
+        <p className="hint">Use Arrows/WASD/Tap to navigate, Enter/Space/Click to select.</p>
       </div>
     );
   } catch (error) {

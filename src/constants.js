@@ -2,7 +2,7 @@
 
 /*  ----------  background constants  ----------  */
 // path is relative to the public/ folder
-export const BG_SRC = '/cave_city_h264.mp4'; // Use the H.264 encoded version
+export const BG_SRC = '/cave_city_h264_compat.mp4'; // Use the H.264 compatibility encoded version
 export const BG_SCALE = 0.25; // Reduced zoom from 1.5 to 1.2 -- Reverted to 0.25
 export const BG_PARALLAX = 0.3; // Parallax factor for background scrolling
 
@@ -19,14 +19,16 @@ export const ENEMY_NECK_GAP   = 4;     // ignore first N segments for AI necks
 /* ---------- safety constant ---------- */
 // "safe" tail distance (in px) used to decide how many neck links to ignore
 // when checking if the player bites its own tail. Bigger == more forgiving.
-export const SAFE_PX = 64;
+// Increased from 96 to compensate for doubled baseSpeed, maintaining similar segment skip count.
+export const SAFE_PX = 192;
 
 /* ---------- joystick constants ---------- */
 export const JOY_MAX_R    = 48;   // px – ring radius
 // tighter dead‑zone for finer control
 export const JOY_DEADZONE = 4;    // px – ignore micro wobbles only
 // per‑joystick turn throttle (lower = snappier feel)
-export const JOY_TURN_COOLDOWN_MS = 20;
+// Reverted to 10ms for responsiveness now that magnitude bug is addressed
+export const JOY_TURN_COOLDOWN_MS = 10;
 
 export const POWERUPS     = ['turbo', 'phase', 'magnet', 'size']; // Not currently used?
 // HTML overlay now handles the menu, so skip the old canvas text

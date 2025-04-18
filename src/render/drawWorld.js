@@ -5,11 +5,9 @@ import { WORLD_SIZE } from '../constants'; // Assuming BG_SCALE is handled elsew
  * Draw the entire game world to canvas context
  * @param {CanvasRenderingContext2D} ctx - canvas context
  * @param {object} world - current world state { orbs, snakes, particles, player, cam }
- * @param {number} viewWidth - width of the canvas viewport
- * @param {number} viewHeight - height of the canvas viewport
  * Note: Background drawing is now handled in GameCanvas.jsx
  */
-export function drawWorld(ctx, world, viewWidth, viewHeight) {
+export function drawWorld(ctx, world) {
   // Background is drawn in GameCanvas.jsx, so we only draw entities and HUD here.
 
   // Save context state before applying transformations/styles

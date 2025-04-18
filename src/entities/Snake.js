@@ -9,7 +9,7 @@ export default class Snake {
     this.isPlayer = isPlayer;
     // AI skill now spans 0.2 – 0.9 so some are clumsy, some are sharp
     this.skill = this.isPlayer ? 1 : rand(0.2, 0.9);
-    this.baseSpeed = 1.2;
+    this.baseSpeed = 2.4;
     // AI speed depends on skill, player speed is base (updated on eat)
     this.speed = this.baseSpeed * (this.isPlayer ? 1 : (0.5 + this.skill * 0.5));
     this.dir = { x: randInt(0,1) * 2 - 1, y: 0 }; // Start horizontal or vertical
@@ -25,6 +25,8 @@ export default class Snake {
     this.eatQueue = [];
     // control the speed of the eat wave animation (smaller = slower)
     this.eatSpeed = 0.5;
+    this.trailPoints = []; // Add array to store recent head positions for trail effect
+    this.maxTrailPoints = 5; // How many points to store for the trail
   }
 
   /* AI steering */
@@ -109,6 +111,15 @@ export default class Snake {
       y: (this.segs[0].y + this.dir.y * this.speed + WORLD_SIZE) % WORLD_SIZE
     };
     this.segs.unshift(head);
+
+    // Add head to trail points (only for player)
+    if (this.isPlayer) {
+      this.trailPoints.unshift({ x: head.x, y: head.y });
+      if (this.trailPoints.length > this.maxTrailPoints) {
+        this.trailPoints.pop();
+      }
+    }
+
     // Grow snake if needed, otherwise remove tail segment
     if (this.segs.length > this.goal) {
         this.segs.pop();
@@ -126,63 +137,138 @@ export default class Snake {
 
   draw(ctx, cam) {
     if (this.dead) return;
-    const baseColor = this.glowFrames > 0 ? '#ffffff' : this.color; // Glow white when recently eaten
 
     ctx.lineCap = 'round';
-    ctx.lineJoin = 'round'; // Smoother joins
+    ctx.lineJoin = 'round';
+
+    // --- Player Specific Enhancements ---
+    if (this.isPlayer) {
+      // 1. Trail Effect
+      const maxTrailSize = 4;
+      this.trailPoints.forEach((p, index) => {
+        const trailProgress = index / this.maxTrailPoints;
+        const sx = p.x - cam.x;
+        const sy = p.y - cam.y;
+        const trailSize = maxTrailSize * (1 - trailProgress);
+        const trailAlpha = 0.5 * (1 - trailProgress);
+
+        ctx.fillStyle = `rgba(0, 234, 255, ${trailAlpha})`; // Player color with alpha
+        ctx.shadowBlur = 5 * (1 - trailProgress); // Fading glow
+        ctx.shadowColor = `rgba(0, 234, 255, ${trailAlpha})`;
+
+        ctx.beginPath();
+        ctx.arc(sx, sy, trailSize, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+    // --- End Player Specific Enhancements ---
+
+    // --- Draw Snake Body Segments ---
+    const baseColor = this.glowFrames > 0 ? '#ffffff' : this.color;
+    const outlineColor = '#ffffff'; // White outline for contrast
+    const playerGlowColor = '#ffff00'; // Bright yellow glow for player
+    const playerGlowBlur = 12;
+    const aiGlowBlur = 10;
 
     for (let i = 0; i < this.segs.length - 1; i++) {
       const p1 = this.segs[i], p2 = this.segs[i + 1];
-      // Calculate screen coordinates relative to camera
       const sx1 = p1.x - cam.x, sy1 = p1.y - cam.y;
       const sx2 = p2.x - cam.x, sy2 = p2.y - cam.y;
 
-      // Smooth eat-wave gradient: swell peaks at wave center, falls off over swellDist
-      const baseW = 6 + (this.length() / 30); // Base width grows with length
-      const swellDist = 5; // How many segments the swell affects
-      // Find max swell factor based on proximity to any eat wave position
+      // --- Calculate Segment Width (incorporating existing eat wave) ---
+      const baseW = 7 + (this.length() / 30);
+      const swellDist = 5;
       const swellFactor = this.eatQueue.reduce((maxFactor, wavePos) => {
         const distFromWave = Math.abs(i - wavePos);
-        const factor = Math.max(0, 1 - distFromWave / swellDist); // Linear falloff
+        const factor = Math.max(0, 1 - distFromWave / swellDist);
         return Math.max(maxFactor, factor);
       }, 0);
-
-      // Width pulse: up to 50% larger at wave center
       const currentWidth = baseW * (1 + swellFactor * 0.5);
-
-      // Stronger pulse effect travelling along the body
       const isPulsing = swellFactor > 0.01;
-      const strokeColor  = isPulsing ? '#ffffff' : baseColor;
-      const shadowColor  = isPulsing ? '#ffffff' : baseColor; // Glow matches pulse
-      const shadowBlur   = isPulsing ? 25 : 10; // More intense glow during pulse
 
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth   = currentWidth;
-      ctx.shadowBlur  = shadowBlur;
-      ctx.shadowColor = shadowColor;
+      // --- Determine Colors and Glow based on state/type ---
+      const segmentColor = isPulsing ? '#ffffff' : baseColor;
+      const segmentShadowColor = this.isPlayer ? playerGlowColor :
+                                 (isPulsing ? '#ffffff' : baseColor);
+      const segmentShadowBlur = this.isPlayer ? playerGlowBlur :
+                                  (isPulsing ? 25 : aiGlowBlur);
 
+      // --- Draw Outline (Player Only for now) ---
+      if (this.isPlayer) {
+        ctx.strokeStyle = outlineColor;
+        ctx.lineWidth = currentWidth + 2; // Slightly thicker for outline
+        ctx.shadowBlur = 0; // No glow for outline itself
+        ctx.beginPath();
+        ctx.moveTo(sx1, sy1);
+        ctx.lineTo(sx2, sy2);
+        ctx.stroke();
+      }
+
+      // --- Draw Main Segment with Glow ---
+      ctx.strokeStyle = segmentColor;
+      ctx.lineWidth = currentWidth;
+      ctx.shadowBlur = segmentShadowBlur;
+      ctx.shadowColor = segmentShadowColor;
       ctx.beginPath();
       ctx.moveTo(sx1, sy1);
-      // Use quadratic curve for smoother segment connections if needed, or just lineTo
-      // ctx.quadraticCurveTo((sx1 + sx2) / 2, (sy1 + sy2) / 2, sx2, sy2);
-      ctx.lineTo(sx2, sy2); // Simple line is often sufficient
+      ctx.lineTo(sx2, sy2);
       ctx.stroke();
     }
+    // --- End Snake Body Segments ---
 
-    // Draw a visible head if the snake is only 1 segment long (or enhance head always)
-    if (this.segs.length > 0) { // Check length > 0
-        const headSeg = this.segs[0];
-        const sx = headSeg.x - cam.x, sy = headSeg.y - cam.y;
-        const headRadius = 4 + this.length() / 30; // Head size based on length
+    // --- Draw Head ---
+    if (this.segs.length > 0) {
+      const headSeg = this.segs[0];
+      const sx = headSeg.x - cam.x, sy = headSeg.y - cam.y;
+      let headRadius = 5 + this.length() / 30;
+      const headColor = this.glowFrames > 0 ? '#ffffff' : this.color;
+      const headShadowColor = this.isPlayer ? playerGlowColor : headColor;
+      let headShadowBlur = this.isPlayer ? playerGlowBlur + 5 : aiGlowBlur; // Slightly stronger player head glow
 
-        ctx.fillStyle = baseColor;
-        ctx.shadowColor = baseColor;
-        ctx.shadowBlur = 10; // Consistent head glow
+      // Player Head Specifics
+      if (this.isPlayer) {
+        headRadius += 1; // Slightly larger player head
 
+        // Draw Outline
+        ctx.strokeStyle = outlineColor;
+        ctx.lineWidth = 2;
+        ctx.shadowBlur = 0;
         ctx.beginPath();
-        ctx.arc(sx, sy, headRadius, 0, Math.PI * 2);
+        ctx.arc(sx, sy, headRadius + 1, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Draw Main Head Fill with Glow
+      ctx.fillStyle = headColor;
+      ctx.shadowColor = headShadowColor;
+      ctx.shadowBlur = headShadowBlur;
+      ctx.beginPath();
+      ctx.arc(sx, sy, headRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Player Eyes
+      if (this.isPlayer) {
+        ctx.fillStyle = '#ffffff'; // White eyes
+        ctx.shadowBlur = 3;
+        ctx.shadowColor = '#ffffff';
+        const angle = Math.atan2(this.dir.y, this.dir.x);
+        const eyeDist = headRadius * 0.5;
+        const eyeRadius = headRadius * 0.2;
+        // Eye 1
+        const eye1X = sx + Math.cos(angle + Math.PI / 4) * eyeDist;
+        const eye1Y = sy + Math.sin(angle + Math.PI / 4) * eyeDist;
+        ctx.beginPath();
+        ctx.arc(eye1X, eye1Y, eyeRadius, 0, Math.PI * 2);
         ctx.fill();
+        // Eye 2
+        const eye2X = sx + Math.cos(angle - Math.PI / 4) * eyeDist;
+        const eye2Y = sy + Math.sin(angle - Math.PI / 4) * eyeDist;
+        ctx.beginPath();
+        ctx.arc(eye2X, eye2Y, eyeRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
+    // --- End Head ---
 
     ctx.shadowBlur = 0; // Reset shadow for other draw calls
   }

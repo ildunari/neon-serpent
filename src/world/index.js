@@ -37,7 +37,7 @@ export function handleCollisions(w) {
       const score = o.type === 'rare' ? 50 : o.type === 'uncommon' ? 25 : 10;
       w.player.goal  += grow;
       w.player.score += score;
-      w.player.speed  = 1.2 + w.player.length() / 60; // Use length() method
+      w.player.speed  = 2.4 + w.player.length() / 60;
       w.player.glowFrames = 30;
       // start a new eat animation wave
       w.player.eatQueue.push(0);

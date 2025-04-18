@@ -1,13 +1,14 @@
 // extracted from NeonSerpentGame_backup.jsx on 2025-04-17
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useResizeCanvas } from '../hooks/useResizeCanvas';
-import { drawWorld } from '../render';
+import { drawWorld } from '../render/drawWorld';
 // Import BG_SCALE, BG_PARALLAX, and WORLD_SIZE from constants
 import { BG_SCALE, BG_PARALLAX, WORLD_SIZE } from '../constants';
 
-export default function GameCanvas({ gameState, setGameState, worldRef }) {
+export default function GameCanvas({ gameState, worldRef }) {
   const canvasRef = useRef(null);
   const bgVidRef = useRef(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
   useResizeCanvas(canvasRef);
 
@@ -59,21 +60,16 @@ export default function GameCanvas({ gameState, setGameState, worldRef }) {
   // Game loop logic (drawing only)
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas?.getContext('2d');
     let animationFrameId;
 
-    const renderLoop = (timestamp) => {
-      // Ensure canvas exists
-      if (!canvas) {
-        animationFrameId = requestAnimationFrame(renderLoop); // Keep trying
-        return;
-      }
+    const gameLoop = () => {
+      // if (gameState !== 'playing') return; // Loop control handled in parent
 
       // Calculate view dimensions in CSS pixels using clientWidth/clientHeight
-      const dpr = window.devicePixelRatio || 1;
-      const viewW = canvas.clientWidth;   // CSS width
-      const viewH = canvas.clientHeight;  // CSS height
+      const rect = canvas.getBoundingClientRect();
+      const viewW = rect.width;   // CSS width
+      const viewH = rect.height;  // CSS height
 
       // Clear canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height); // Use raw canvas buffer dimensions
@@ -130,18 +126,21 @@ export default function GameCanvas({ gameState, setGameState, worldRef }) {
       }
       // --- END BACKGROUND DRAWING LOGIC ---
 
-      // Draw the game world entities only when playing and world exists
+      // Draw the game world entities only when playing
       if (gameState === 'playing' && worldRef.current) {
-        // Pass CSS pixel dimensions to drawWorld
-        drawWorld(ctx, worldRef.current, viewW, viewH);
+        console.log('>>> Drawing world. State:', gameState, 'World:', worldRef.current); // DEBUG LOG
+        drawWorld(ctx, worldRef.current);
+
+        // Debug: Draw bounding boxes
+        // ... existing code ...
       }
       // Potentially draw other state-specific things on canvas if needed (e.g., simple "PAUSED" text)
       // else if (gameState === 'paused') { ... }
 
-      animationFrameId = requestAnimationFrame(renderLoop);
+      animationFrameId = requestAnimationFrame(gameLoop);
     };
 
-    renderLoop(0); // Start the loop
+    gameLoop(); // Start the loop
 
     return () => {
       cancelAnimationFrame(animationFrameId);
@@ -159,10 +158,10 @@ export default function GameCanvas({ gameState, setGameState, worldRef }) {
         style={{ display: 'none', pointerEvents: 'none' }}
         preload="auto"
       >
-        {/* List AV1 first for efficiency */}
-        <source src="/cave_city.mp4" type="video/mp4; codecs=av01" /> 
-        {/* H.264 fallback (compatibility version) */}
-        <source src="/cave_city_h264_compat.mp4" type="video/mp4; codecs=avc1" /> 
+        {/* AV1 for modern browsers */}
+        <source src="/cave_city.mp4" type="video/mp4; codecs=av01" />
+        {/* H.264 for wider compatibility (Safari, older browsers) */}
+        <source src="/cave_city_h264_compat.mp4" type="video/mp4; codecs=avc1" />
         Your browser does not support the video tag. 
       </video>
     </>

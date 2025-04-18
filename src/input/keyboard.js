@@ -7,7 +7,7 @@ import { useEffect, useState, useCallback } from 'react';
  */
 export function useKeyboard() {
   const [keys, setKeys] = useState({});
-  const [dir, setDir] = useState({ x: 1, y: 0 }); // Start facing right
+  const [dir, setDir] = useState({ x: 0, y: 0 }); // Start with no direction
 
   const updateDir = useCallback((currentKeys) => {
     let dx = 0;
