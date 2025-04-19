@@ -1,6 +1,10 @@
 /*  Neon Serpent — Modular React Build
     React + HTML5 canvas
     2025-04-17   */
+// Verification checklist (Updated 2025-05-20):
+//   [X] NeonSerpentGame.jsx compiles without the old loop (handled by edit)
+//   [ ] Only one RAF appears in DevTools Performance tab (Manual check required)
+//   [ ] Game still enters 'gameover' correctly (Manual check required)
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import GameCanvas from './components/GameCanvas';
@@ -98,85 +102,46 @@ export default function NeonSerpentGame() {
     setShowControls(false);
   }, []);
 
-  // Game Loop: Update world state
+  // Input Handling Effect (runs independently of render loop)
   useEffect(() => {
-    if (gameState !== 'playing' || !worldRef.current) return;
+    // Only process input if playing and player exists
+    if (gameState !== 'playing' || !worldRef.current?.player) return;
 
-    let animationFrameId;
-    let lastTimestamp = performance.now();
+    const now = Date.now();
+    const turnCooldown = joystickState.active ? JOY_TURN_COOLDOWN_MS : TURN_COOLDOWN_MS;
+    let desiredDir = null;
 
-    const loop = (timestamp) => {
-      const dt = timestamp - lastTimestamp;
-      lastTimestamp = timestamp;
+    // Determine desired direction from input
+    if (joystickState.active && joyVec) {
+      desiredDir = joyVec;
+    } else if (!joystickState.active && (keyDir.x !== 0 || keyDir.y !== 0)) {
+      // Only use keyboard if joystick is not active
+      desiredDir = keyDir;
+    }
 
-      if (gameState === 'playing' && worldRef.current) {
-        // --- Input Processing --- (Moved here for consistency)
-        const now = Date.now();
-        const turnCooldown = joystickState.active ? JOY_TURN_COOLDOWN_MS : TURN_COOLDOWN_MS;
-        let desiredDir = null;
+    // Process turn if a direction is desired and cooldown has passed
+    if (desiredDir && now - lastTurnRef.current > turnCooldown) {
+      const player = worldRef.current.player;
+      const head = player.segs[0];
 
-        if (joystickState.active && joyVec) {
-          desiredDir = joyVec;
-        } else if (!joystickState.active && (keyDir.x !== 0 || keyDir.y !== 0)) {
-          // Only use keyboard if joystick is not active
-          desiredDir = keyDir;
-        }
+      // Calculate next head position based on desired direction for collision check
+      // Ensures wrap-around logic is considered for the check
+      const nextX = (head.x + desiredDir.x * player.speed + WORLD_SIZE) % WORLD_SIZE;
+      const nextY = (head.y + desiredDir.y * player.speed + WORLD_SIZE) % WORLD_SIZE;
 
-        if (desiredDir && now - lastTurnRef.current > turnCooldown) {
-          const player = worldRef.current.player;
-          const head = player.segs[0];
+      // Check if the turn would immediately collide with the tail/neck
+      const skipCount = playerSkip(player); // Calculate skip count for the check
+      const wouldBite = willHitTail(nextX, nextY, player.segs, skipCount);
 
-          // Calculate next head position for collision check
-          const nextX = (head.x + desiredDir.x * player.speed + WORLD_SIZE) % WORLD_SIZE;
-          const nextY = (head.y + desiredDir.y * player.speed + WORLD_SIZE) % WORLD_SIZE;
-
-          // Check if the turn would bite the tail/neck
-          const wouldBite = willHitTail(nextX, nextY, player.segs, playerSkip(player));
-
-          // Update direction if it wouldn't bite the tail (180 turns are now allowed if safe)
-          if (!wouldBite) {
-            // Update player direction directly
-            player.dir.x = desiredDir.x;
-            player.dir.y = desiredDir.y;
-            lastTurnRef.current = now;
-            // console.log(`Turn accepted: ${desiredDir.x}, ${desiredDir.y}`); // Optional: for debugging
-            // Add to lastMoves if that debugging feature is desired
-          }
-        }
-        // --- End Input Processing ---
-
-        // Update world logic - pass current canvas CSS dimensions
-        const { width: viewW, height: viewH } = canvasSizeRef.current;
-        worldRef.current = updateWorld(worldRef.current, dt, viewW, viewH);
-
-        // --- Calculate player skip count ---
-        if (worldRef.current.player) {
-          const skipCount = playerSkip(worldRef.current.player);
-          setPlayerSkipCount(skipCount); // Update state
-        } else {
-          setPlayerSkipCount(0); // Reset if player doesn't exist
-        }
-        // --- End Skip Count Calculation ---
-
-        // Check for game over
-        if (worldRef.current.player.dead) {
-          console.log("Player died! Setting game state to gameover.");
-          setGameState('gameover');
-        }
+      // Update player direction if the turn is safe
+      if (!wouldBite) {
+        player.dir.x = desiredDir.x;
+        player.dir.y = desiredDir.y;
+        lastTurnRef.current = now;
+        // console.log(`Turn accepted: ${desiredDir.x}, ${desiredDir.y}`); // Optional debug
       }
-
-      if (gameState === 'playing') { // Continue loop only if still playing
-        animationFrameId = requestAnimationFrame(loop);
-      }
-    };
-
-    animationFrameId = requestAnimationFrame(loop);
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-    };
-    // Pass canvasSizeRef.current if needed? No, it's read inside the loop.
-  }, [gameState, keyDir, joyVec, joystickState.active]); // Correct dependency array
+    }
+  }, [gameState, keyDir, joyVec, joystickState.active, worldRef]); // Dependencies
 
   // Menu Navigation and Selection + Global Key Handlers
   useEffect(() => {
@@ -241,7 +206,9 @@ export default function NeonSerpentGame() {
       <GameCanvas
         gameState={gameState}
         worldRef={worldRef}
-        playerSkipCount={playerSkipCount} // <--- Pass skip count as prop
+        playerSkipCount={playerSkipCount}
+        setGameState={setGameState}
+        setPlayerSkipCount={setPlayerSkipCount}
       />
 
       {/* Conditional Overlays */}

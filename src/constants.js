@@ -33,3 +33,9 @@ export const JOY_TURN_COOLDOWN_MS = 10;
 export const POWERUPS     = ['turbo', 'phase', 'magnet', 'size']; // Not currently used?
 // HTML overlay now handles the menu, so skip the old canvas text
 export const DRAW_CANVAS_MENU = false; // Likely deprecated by React UI
+
+export const PLAYER_RADIUS = 12;
+export const ORB_RADIUS = 8;
+export const ORB_SPRITE_SRC = '/orbs.png';
+
+export const ATTRACT_RADIUS = 100;

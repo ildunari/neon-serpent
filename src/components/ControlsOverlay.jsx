@@ -10,8 +10,8 @@ export default function ControlsOverlay({ onBack, controlsInfo }) {
     <div className="controls-overlay">
       <h2>Controls</h2>
       <div className="controls-grid">
-        {controlsInfo.map(control => (
-          <div key={control.label} className="control-item">
+        {controlsInfo.map((control, index) => (
+          <div key={index} className="control-item">
             <span className="control-label">{control.label}:</span>
             <div className="control-icons">
               {control.icons.length > 0 ? (
