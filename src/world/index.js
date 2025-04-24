@@ -1,11 +1,11 @@
 // extracted from NeonSerpentGame_backup.jsx on 2025-04-17
 // TODO: Move handleCollisions, and world tick update logic here
 
-import { INITIAL_AI, ORB_COUNT, WORLD_SIZE, ENEMY_NECK_GAP, CAM_SMOOTH } from '../constants'; // Need INITIAL_AI for respawn logic, ORB_COUNT, WORLD_SIZE, ENEMY_NECK_GAP for collisions, CAM_SMOOTH for update
+import { INITIAL_AI, ORB_COUNT, WORLD_SIZE, ENEMY_NECK_GAP } from '../constants'; // Removed CAM_SMOOTH
 import Snake, { createAISnake } from '../entities/Snake'; // Need Snake class and helper for respawn/creation
 import Orb from '../entities/Orb'; // Need Orb class
-import Particle from '../entities/Particle'; // Need Particle class
-import { rand, randInt, dist, segRadius, lerp, playerSkip } from '../utils/math'; // Keep playerSkip for now, it seems used
+// Removed Particle import
+import { rand, randInt, dist, segRadius, playerSkip } from '../utils/math'; // Removed lerp
 
 export function createWorld() {
   const orbs = Array.from({ length: ORB_COUNT }, () =>
@@ -22,7 +22,6 @@ export function createWorld() {
     snakes,
     player,
     cam: { x: player.segs[0].x, y: player.segs[0].y },
-    particles: [],
     deathInfo: null
   };
 }
@@ -41,8 +40,16 @@ export function handleCollisions(w) {
       w.player.glowFrames = 30;
       // start a new eat animation wave
       w.player.eatQueue.push(0);
-      const sparks = 6 + (o.type === 'rare' ? 12 : o.type === 'uncommon' ? 6 : 0);
-      for (let i = 0; i < sparks; i++) w.particles.push(new Particle(head.x, head.y));
+      // --- Use Particle Pool ---
+      if (w.particleManager && typeof w.particleManager.get === 'function') {
+          const sparks = 6 + (o.type === 'rare' ? 12 : o.type === 'uncommon' ? 6 : 0);
+          for (let i = 0; i < sparks; i++) {
+              w.particleManager.get(head.x, head.y); // Get particle from pool using player head and orb position
+          }
+      } else {
+          console.warn("Particle manager not found when eating orb");
+      }
+      // --- End Particle Pool ---
       return false;
     }
     return true;
@@ -56,11 +63,19 @@ export function handleCollisions(w) {
     const eh = s.segs[0];
     for (let i = 8; i < w.player.segs.length; i++) { // Use constant or playerSkip? Original used 8
       if (dist(eh, w.player.segs[i]) < 8) { // Use constant or segRadius? Original used 8
-        // kill enemy on touching tail
+        // kill enemy on touching player tail
         s.dead = true;
         w.player.goal += Math.floor(s.length() / 2); // Use length() method
         w.player.score += s.score;
-        break;
+        // Add particles for enemy death
+        if (w.particleManager && typeof w.particleManager.get === 'function') {
+            const deathSparks = 15 + Math.floor(s.length() / 2); // More sparks for longer snakes
+            for (let j = 0; j < deathSparks; j++) {
+                // Spread sparks along the body? Or just at head? Let's do head.
+                w.particleManager.get(eh.x + rand(-5, 5), eh.y + rand(-5, 5));
+            }
+        }
+        break; // Exit inner loop once enemy is dead
       }
     }
   });
@@ -81,23 +96,27 @@ export function handleCollisions(w) {
         if (s.isPlayer) { // Player hit their own tail
           w.deathInfo = { reason: 'self_tail_collision', segment: i };
           w.player.dead = true; // Kill the player specifically
+          // Add player death particles
+          if (w.particleManager && typeof w.particleManager.get === 'function') {
+              const deathSparks = 20;
+              for (let j = 0; j < deathSparks; j++) {
+                  w.particleManager.get(head.x + rand(-8, 8), head.y + rand(-8, 8));
+              }
+          }
         } else { // Player hit an enemy tail
           w.deathInfo = { reason: 'player_hit_enemy_tail', enemyColor: s.color };
           w.player.dead = true; // Kill the player
-          // Original backup killed the *enemy* snake here and gave player points.
-          // Current logic kills the *player*. Confirm which is intended.
-          // If enemy should die:
-          // s.dead = true;
-          // w.player.goal += Math.floor(s.length() / 2);
-          // w.player.score += s.score;
+          // Add player death particles
+          if (w.particleManager && typeof w.particleManager.get === 'function') {
+              const deathSparks = 20;
+              for (let j = 0; j < deathSparks; j++) {
+                  w.particleManager.get(head.x + rand(-8, 8), head.y + rand(-8, 8));
+              }
+          }
         }
-        // If player dies, break outer loop?
-        // break; // Break inner loop (segment check)
       }
     }
-    // if (w.player.dead) break; // Break outer loop (snake check) if player died
   });
-
 
   /* clean dead snakes + respawn */
   // Filter out dead non-player snakes
@@ -119,24 +138,21 @@ export function updateWorld(world, dt, viewW, viewH) { // Add viewW, viewH param
   // AI think and update
   world.snakes.forEach(s => s.think && s.think(world, p));
   world.snakes.forEach(s => s.update(world)); // Pass world to update if needed by logic inside
-  world.particles.forEach(pr => pr.update());
-  world.particles = world.particles.filter(pr => pr.life > 0);
 
   handleCollisions(world); // Handle collisions after updates
 
   // Check for player death *after* collisions
   if (world.player.dead) {
       if (!world.hasLoggedDeath) { // prevent spam
-          console.log('Player died:', world.deathInfo ?? 'unknown cause');
-          // console.table(lastMoves); // lastMoves is not available here
           world.hasLoggedDeath = true;
       }
-      // Potentially set game state here or return a flag
   }
 
-  // camera follows head, centered in view
-  world.cam.x = lerp(world.cam.x, p.segs[0].x - viewW * 0.5, CAM_SMOOTH);
-  world.cam.y = lerp(world.cam.y, p.segs[0].y - viewH * 0.5, CAM_SMOOTH);
+  // camera follows head - set target position (lerp happens in GameCanvas)
+  if (world.player.segs && world.player.segs[0]) {
+      world.cam.x = world.player.segs[0].x;
+      world.cam.y = world.player.segs[0].y;
+  }
 
   return world;
 }

@@ -33,16 +33,20 @@ neon-serpent/
 
 ## Key Modules
 
-*   **`src/NeonSerpentGame.jsx`**: The main React component that orchestrates the game state (menu, playing, gameover), handles the main loop (possibly using custom hooks), processes inputs, and renders UI overlays.
-*   **`src/components/GameCanvas.jsx`**: Responsible for setting up the HTML5 canvas and delegating drawing operations.
-*   **`src/render/drawWorld.js`**: Contains the core logic for drawing game elements (background, orbs, snakes, particles) onto the canvas based on the world state.
-*   **`src/world/index.js`**: Contains functions for creating the initial game world (`createWorld`), updating the world state each tick (`updateWorld`), and handling collisions between game entities (`handleCollisions`).
+*   **`src/NeonSerpentGame.jsx`**: The main React component that manages the overall game state (`menu`, `playing`, `paused`, `gameover`), handles dynamic menu options (e.g., 'Resume' vs 'Start Game'), processes inputs via hooks, coordinates the `GameCanvas` and UI overlays (`MenuOverlay`, `ControlsOverlay`), and triggers game start/restart logic.
+*   **`src/components/`**: Contains reusable React UI components.
+    *   **`GameCanvas.jsx`**: Sets up the HTML5 canvas and likely manages the `requestAnimationFrame` loop, delegating drawing to the render logic.
+    *   **`MenuOverlay.jsx`**: Displays the main menu with dynamic options based on game state.
+    *   **`ControlsOverlay.jsx`**: Displays the controls information screen.
 *   **`src/entities/`**: Defines the classes for game objects like `Snake`, `Orb`, and `Particle`, including their state, update logic, and possibly drawing methods (or data for the renderer).
-*   **`src/input/`**: Manages user input from the keyboard (`keyboard.js`) and virtual joystick (`joystick.js`).
-*   **`src/utils/math.js`**: Provides utility functions for math operations, physics calculations (`dist`, `lerp`, `willHitTail`, `playerSkip`), and random number generation.
+*   **`src/input/`**: Manages user input using custom React hooks:
+    *   **`useKeyboard()`**: Handles WASD/Arrow key input.
+    *   **`useJoystick()`**: Handles virtual joystick input for touch devices.
+    *   Includes logic for turn cooldowns and safety checks (`willHitTail`) to prevent immediate self-collision.
+*   **`src/utils/math.js`**: Provides utility functions for math operations and physics calculations (e.g., `dist`, `lerp`, `willHitTail` for turn safety checks, `playerSkip` for collision lookahead).
 *   **`src/constants.js`**: Centralizes game configuration values like world size, speeds, cooldowns, entity counts, etc.
 *   **`src/main.jsx`**: The application entry point, responsible for rendering the root React component (`App.jsx`).
-*   **`src/hooks/`**: Likely contains custom React Hooks for managing game state, loops, or other reusable logic.
+*   **`src/hooks/`**: Contains custom React Hooks, such as `useKeyboard` and `useJoystick` for input management, and potentially others for game loop or state logic.
 
 ## Getting Started
 

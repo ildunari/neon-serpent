@@ -1,309 +1,368 @@
-// extracted from NeonSerpentGame_backup.jsx on 2025-04-17
+/*
+ * src/entities/Snake.js
+ * Manages its own PIXI.Graphics lifecycle.
+ * Contains the complex drawing logic for snake body/head.
+ */
+import * as PIXI from 'pixi.js';
 import { WORLD_SIZE } from '../constants';
-import { rand, randInt, dist } from '../utils/math';
+import { rand, randInt, dist, playerSkip, segRadius } from '../utils/math'; // Import necessary utils
 
 export default class Snake {
-  constructor(x, y, isPlayer = false, brain = 'gather') {
-    this.segs = [{ x, y }];          // head first
-    this.goal = 6;                   // target length (# segments)
-    this.isPlayer = isPlayer;
-    // AI skill now spans 0.2 – 0.9 so some are clumsy, some are sharp
-    this.skill = this.isPlayer ? 1 : rand(0.2, 0.9);
-    this.baseSpeed = 2.4;
-    // AI speed depends on skill, player speed is base (updated on eat)
-    this.speed = this.baseSpeed * (this.isPlayer ? 1 : (0.5 + this.skill * 0.5));
-    this.dir = { x: randInt(0,1) * 2 - 1, y: 0 }; // Start horizontal or vertical
-    if (this.dir.x !== 0) this.dir.y = 0; else this.dir.y = randInt(0,1) * 2 - 1;
+    // --- Game State ---
+    segs = [];
+    goal = 6;
+    isPlayer = false;
+    skill = 1;
+    baseSpeed = 2.4; // Increased base speed
+    speed = 2.4;
+    // Use vx, vy for current movement direction/velocity magnitude
+    vx = 1;
+    vy = 0;
+    // dir object can be removed or kept just for initial setting if preferred
+    // dir = { x: 1, y: 0 }; // Redundant if using vx/vy primarily
+    brain = 'gather';
+    score = 0;
+    dead = false;
+    color = 0x00eaff; // Default player color (hex number)
+    glowFrames = 0;
+    eatQueue = [];
+    eatSpeed = 0.5;
+    visible = true; // Game logic visibility
 
-    this.brain = brain;
-    this.score = 0;
-    this.dead = false;
-    this.color = isPlayer ? '#00eaff' :
-      (brain === 'hunt' ? '#ff4b4b' : brain === 'coward' ? '#ffcf1b' : '#6cff6c');
-    this.glowFrames = 0;
-    // queue of segment indices for eat animations
-    this.eatQueue = [];
-    // control the speed of the eat wave animation (smaller = slower)
-    this.eatSpeed = 0.5;
-    this.trailPoints = []; // Add array to store recent head positions for trail effect
-    this.maxTrailPoints = 3; // Reduced from 5
-  }
+    // --- PixiJS Specific ---
+    pixiObject = null; // Holds the PIXI.Graphics instance
 
-  /* AI steering */
-  think(world, player) {
-    if (this.isPlayer || this.dead) return; // Don't think if player or dead
-    // AI reaction based on skill: skip thinking occasionally for lower-skilled snakes
-    if (Math.random() > this.skill) return;
+    // Debug ID
+    static nextId = 0;
+    id = `snake_${Snake.nextId++}`;
 
-    const head = this.segs[0];
-    // avoid player's tail segments
-    const avoidThresh = 10 + (1 - this.skill) * 20;   // 10–30 px depending on skill
-    for (let i = 8; i < player.segs.length; i++) { // Start check further back on player tail
-      const ts = player.segs[i];
-      if (dist(head, ts) < avoidThresh) {
-        // steer away from tail collision
-        const fleeAngle = Math.atan2(head.y - ts.y, head.x - ts.x);
-        this.dir.x = Math.cos(fleeAngle);
-        this.dir.y = Math.sin(fleeAngle);
-        return; // Prioritize avoidance
-      }
-    }
+    constructor(x, y, isPlayer = false, brain = 'gather') {
+        this.segs = [{ x, y }];
+        this.isPlayer = isPlayer;
+        this.brain = brain;
+        this.skill = this.isPlayer ? 1 : rand(0.2, 0.9);
+        this.speed = this.baseSpeed * (this.isPlayer ? 1 : (0.5 + this.skill * 0.5));
 
-    let target = null;
-    // Simple brain logic (can be expanded)
-    if (this.brain === 'gather') {
-       // Find closest orb (simple version: random orb)
-       if (world.orbs.length > 0) {
-         target = world.orbs.reduce((closest, orb) => {
-            const d = dist(head, orb);
-            return d < dist(head, closest) ? orb : closest;
-         }, world.orbs[0]);
-       } else {
-         target = { x: rand(0, WORLD_SIZE), y: rand(0, WORLD_SIZE) }; // Wander if no orbs
-       }
-    } else if (this.brain === 'hunt') {
-      // Target player head or closest other snake head
-      const others = world.snakes.filter(s => s !== this && !s.dead);
-      if (Math.random() < 0.5 || others.length === 0) { // Target player 50% or if no others
-        target = player.segs[0];
-      } else { // Target closest other snake
-        const closest = others.reduce((best, s) =>
-          (dist(head, s.segs[0]) < dist(head, best.segs[0]) ? s : best),
-          others[0]);
-        target = closest.segs[0];
-      }
-    } else if (this.brain === 'coward') {
-      const playerHead = player.segs[0];
-      const d = dist(head, playerHead);
-      // Flee if player is bigger and close
-      if (player.length() > this.length() && d < 300) {
-        target = { x: head.x - (playerHead.x - head.x),
-                   y: head.y - (playerHead.y - head.y) }; // Opposite direction
-      } else { // Otherwise, gather orbs like 'gather' brain
-        if (world.orbs.length > 0) {
-          target = world.orbs.reduce((closest, orb) => {
-             const d = dist(head, orb);
-             return d < dist(head, closest) ? orb : closest;
-          }, world.orbs[0]);
+        // Initial direction (random horizontal/vertical)
+        const startDir = randInt(0, 1) * 2 - 1;
+        if (randInt(0, 1) === 0) {
+            this.vx = startDir; this.vy = 0;
         } else {
-          target = { x: rand(0, WORLD_SIZE), y: rand(0, WORLD_SIZE) }; // Wander
+            this.vx = 0; this.vy = startDir;
         }
-      }
+        // this.dir.x = this.vx; // Sync dir if keeping it
+        // this.dir.y = this.vy;
+
+        this.color = isPlayer ? 0x00eaff : // Player: Cyan
+            (brain === 'hunt' ? 0xff4b4b : // Hunt: Red
+             brain === 'coward' ? 0xffcf1b : // Coward: Yellow
+             0x6cff6c); // Gather: Green (Use hex numbers)
+
+        this.visible = !this.dead;
     }
 
-    if (target) {
-      const angle = Math.atan2(target.y - head.y, target.x - head.x);
-      // Apply skill-based wobble/inaccuracy
-      const wobble = (1 - this.skill) * 0.5; // up to ±0.5 rad inaccuracy
-      const offset = rand(-wobble, wobble);
-      const finalAngle = angle + offset;
-      this.dir.x = Math.cos(finalAngle);
-      this.dir.y = Math.sin(finalAngle);
+    // --- Core Logic Methods ---
+    think(world, player) {
+        if (this.isPlayer || this.dead) return;
+        if (Math.random() > this.skill) return; // Skip thinking sometimes based on skill
+
+        const head = this.segs[0];
+        const avoidThresh = 10 + (1 - this.skill) * 20; // Skill-based avoidance radius
+
+        // Avoid player tail
+        // Use playerSkip to determine how many segments of player are "safe" to ignore
+        const playerSafeSegments = playerSkip(player);
+        for (let i = playerSafeSegments; i < player.segs.length; i++) {
+            const ts = player.segs[i];
+            if (dist(head, ts) < avoidThresh) {
+                const fleeAngle = Math.atan2(head.y - ts.y, head.x - ts.x);
+                // Update vx/vy directly, magnitude is handled by speed
+                this.vx = Math.cos(fleeAngle);
+                this.vy = Math.sin(fleeAngle);
+                // this.dir.x = this.vx; this.dir.y = this.vy; // Sync dir if kept
+                return; // Prioritize avoidance
+            }
+        }
+
+        // Target selection based on brain
+        let target = null;
+        if (this.brain === 'gather') {
+             // Find closest orb
+             if (world.orbs.length > 0) {
+                 target = world.orbs.reduce((closest, orb) => (dist(head, orb) < dist(head, closest) ? orb : closest), world.orbs[0]);
+             } else { // Wander if no orbs
+                 target = { x: rand(0, WORLD_SIZE), y: rand(0, WORLD_SIZE) };
+             }
+        } else if (this.brain === 'hunt') {
+            const others = world.snakes.filter(s => s !== this && !s.dead);
+            // Target player head or closest other snake head
+            if (Math.random() < 0.5 || others.length === 0) {
+                target = player.segs[0];
+            } else {
+                const closest = others.reduce((best, s) => (dist(head, s.segs[0]) < dist(head, best.segs[0]) ? s : best), others[0]);
+                target = closest.segs[0];
+            }
+        } else if (this.brain === 'coward') {
+            const playerHead = player.segs[0];
+            const d = dist(head, playerHead);
+            // Flee if player is bigger and close
+            if (player.length() > this.length() && d < 300) {
+                target = { x: head.x - (playerHead.x - head.x), y: head.y - (playerHead.y - head.y) }; // Flee point
+            } else { // Otherwise, gather like gather brain
+                 if (world.orbs.length > 0) {
+                      target = world.orbs.reduce((closest, orb) => (dist(head, orb) < dist(head, closest) ? orb : closest), world.orbs[0]);
+                 } else {
+                      target = { x: rand(0, WORLD_SIZE), y: rand(0, WORLD_SIZE) };
+                 }
+            }
+        }
+
+        // Steer towards target with skill-based wobble
+        if (target) {
+            const angle = Math.atan2(target.y - head.y, target.x - head.x);
+            const wobble = (1 - this.skill) * 0.5; // Wobble increases as skill decreases
+            const offset = rand(-wobble, wobble);
+            const finalAngle = angle + offset;
+            // Update vx/vy directly
+            this.vx = Math.cos(finalAngle);
+            this.vy = Math.sin(finalAngle);
+            // this.dir.x = this.vx; this.dir.y = this.vy; // Sync dir if kept
+        }
     }
-  }
 
+    update(world) { // world might not be needed unless accessing particles etc.
+        if (this.dead) return;
 
-  update(world) {
-    if (this.dead) return;
-    // compute new head with wrap-around world
-    const head = {
-      x: (this.segs[0].x + this.dir.x * this.speed + WORLD_SIZE) % WORLD_SIZE,
-      y: (this.segs[0].y + this.dir.y * this.speed + WORLD_SIZE) % WORLD_SIZE
-    };
-    this.segs.unshift(head);
+        // Compute new head position using vx, vy and speed
+        const head = {
+            x: (this.segs[0].x + this.vx * this.speed + WORLD_SIZE) % WORLD_SIZE,
+            y: (this.segs[0].y + this.vy * this.speed + WORLD_SIZE) % WORLD_SIZE
+        };
+        this.segs.unshift(head);
 
-    // Add head to trail points (only for player)
-    if (this.isPlayer) {
-      this.trailPoints.unshift({ x: head.x, y: head.y });
-      if (this.trailPoints.length > this.maxTrailPoints) {
-        this.trailPoints.pop();
-      }
+        // Remove tail segment if length exceeds goal
+        if (this.segs.length > this.goal) {
+            this.segs.pop();
+        }
+
+        // Update eat animation queue
+        this.eatQueue = this.eatQueue
+            .map(p => p + this.eatSpeed)
+            .filter(p => p < this.segs.length);
+
+        // Update glow effect timer
+        if (this.glowFrames > 0) this.glowFrames--;
+
+        // Update visibility state (redundant if only set on death?)
+        this.visible = !this.dead;
     }
 
-    // Grow snake if needed, otherwise remove tail segment
-    if (this.segs.length > this.goal) {
-        this.segs.pop();
-    }
-    // advance eat animation positions at reduced speed and remove finished
-    this.eatQueue = this.eatQueue
-      .map(p => p + this.eatSpeed)
-      .filter(p => p < this.segs.length);
+    length() { return this.segs.length; }
 
-    // Decay glow effect
-    if (this.glowFrames > 0) this.glowFrames--;
-  }
+    // --- PixiJS Methods ---
 
-  length() { return this.segs.length; }
+    initPixi(container) { // Pass container (e.g., gameContainerRef.current)
+        if (this.pixiObject) return; // Already initialized
 
-  draw(ctx, cam, skipCount = 0) {
-    if (this.dead) return;
+        this.pixiObject = new PIXI.Graphics();
+        this.pixiObject.visible = this.visible;
+        this.pixiObject.zIndex = this.isPlayer ? 3 : 2; // Player on top
+        this.pixiObject.eventMode = 'none';
 
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-
-    // --- Player Specific Enhancements ---
-    if (this.isPlayer) {
-      // 1. Trail Effect (Optimized)
-      const maxTrailSize = 3; // Slightly reduced size to match fewer points
-      this.trailPoints.forEach((p, index) => {
-        const trailProgress = index / this.maxTrailPoints;
-        const sx = p.x - cam.x;
-        const sy = p.y - cam.y;
-        const trailSize = maxTrailSize * (1 - trailProgress);
-        const trailAlpha = 0.3 * (1 - trailProgress); // Reduced alpha
-
-        ctx.fillStyle = `rgba(0, 234, 255, ${trailAlpha})`; // Player color with alpha
-        // --- Optimization: Reduce trail glow ---
-        ctx.shadowBlur = 3 * (1 - trailProgress); // Reduced from 5
-        ctx.shadowColor = `rgba(0, 234, 255, ${trailAlpha / 2})`; // Dimmer glow
-
-        ctx.beginPath();
-        ctx.arc(sx, sy, trailSize, 0, Math.PI * 2);
-        ctx.fill();
-      });
-    }
-    // --- End Player Specific Enhancements ---
-
-    // --- Draw Snake Body Segments ---
-    const baseColor = this.glowFrames > 0 ? '#ffffff' : this.color;
-    const outlineColor = '#ffffff'; // White outline for contrast
-    const playerGlowColor = '#ffff00'; // Bright yellow glow for player
-    // --- Adjusted glow blur values ---
-    const playerGlowBlur = 9;  // User requested value (was 6, originally 12)
-    // AI Glow removed (aiGlowBlur not needed here)
-
-    for (let i = 0; i < this.segs.length - 1; i++) {
-      const p1 = this.segs[i], p2 = this.segs[i + 1];
-      const sx1 = p1.x - cam.x, sy1 = p1.y - cam.y;
-      const sx2 = p2.x - cam.x, sy2 = p2.y - cam.y;
-
-      // --- Calculate Segment Width (incorporating existing eat wave) ---
-      const baseW = 7 + (this.length() / 30);
-      const swellDist = 5;
-      const swellFactor = this.eatQueue.reduce((maxFactor, wavePos) => {
-        const distFromWave = Math.abs(i - wavePos);
-        const factor = Math.max(0, 1 - distFromWave / swellDist);
-        return Math.max(maxFactor, factor);
-      }, 0);
-      const currentWidth = baseW * (1 + swellFactor * 0.5);
-      const isPulsing = swellFactor > 0.01;
-
-      // --- Determine Colors and Glow (AI Glow Removed) ---
-      let segmentStrokeStyle;
-      let segmentShadowColor = 'transparent';
-      let segmentShadowBlur = 0;
-
-      const isSafePlayerSegment = this.isPlayer && skipCount > 0 && i < skipCount;
-
-      if (isSafePlayerSegment) {
-        segmentStrokeStyle = '#0099aa';
-        segmentShadowColor = '#0099aa';
-        segmentShadowBlur = 3;
-      } else if (this.isPlayer) {
-        // Player (dangerous segments) or pulsing player
-        segmentStrokeStyle = isPulsing ? '#ffffff' : baseColor;
-        segmentShadowColor = playerGlowColor;
-        // Use the adjusted playerGlowBlur
-        segmentShadowBlur = isPulsing ? playerGlowBlur + 4 : playerGlowBlur;
-      } else {
-        // AI Snake (No Glow except pulsing)
-        segmentStrokeStyle = isPulsing ? '#ffffff' : baseColor;
-        if (isPulsing) {
-          segmentShadowColor = '#ffffff'; // White glow when pulsing
-          segmentShadowBlur = 15; // Pulsing AI glow (keep this intense for feedback)
+        if (container && !container.destroyed) { // Check container validity
+             container.addChild(this.pixiObject);
         } else {
-          // No glow/shadow for standard AI segments
-          segmentShadowColor = 'transparent';
-          segmentShadowBlur = 0;
+             console.error(`Failed to add Snake PIXI object: Container invalid or destroyed. Snake ID: ${this.id}`);
+             // Don't destroy the graphics object itself here, just fail to add
         }
-      }
-
-      // --- Draw Outline (Player Only) ---
-      if (this.isPlayer) {
-        ctx.strokeStyle = outlineColor;
-        ctx.lineWidth = currentWidth + 2;
-        ctx.shadowBlur = 0;
-        ctx.beginPath();
-        ctx.moveTo(sx1, sy1);
-        ctx.lineTo(sx2, sy2);
-        ctx.stroke();
-      }
-
-      // --- Draw Main Segment with Glow ---
-      ctx.strokeStyle = segmentStrokeStyle;
-      ctx.lineWidth = currentWidth;
-      ctx.shadowBlur = segmentShadowBlur;
-      ctx.shadowColor = segmentShadowColor;
-      ctx.beginPath();
-      ctx.moveTo(sx1, sy1);
-      ctx.lineTo(sx2, sy2);
-      ctx.stroke();
     }
-    // --- End Snake Body Segments ---
 
-    // --- Draw Head (AI Glow Removed) ---
-    if (this.segs.length > 0) {
-      const headSeg = this.segs[0];
-      const sx = headSeg.x - cam.x, sy = headSeg.y - cam.y;
-      let headRadius = 5 + this.length() / 30;
-      const headColor = this.glowFrames > 0 ? '#ffffff' : this.color;
-      let headShadowColor = 'transparent';
-      let headShadowBlur = 0;
+    // Syncs the PIXI.Graphics object with the current snake state
+    syncPixi(playerSkipCount = 0) { // Pass skipCount for player rendering
+        if (!this.pixiObject || this.pixiObject.destroyed) return; // Check if destroyed
 
-      if (this.isPlayer) {
-        headRadius += 1;
-        headShadowColor = playerGlowColor;
-        // Use adjusted playerGlowBlur for head
-        headShadowBlur = playerGlowBlur + 2;
+        // Debug visibility - only log player visibility state once
+        if (this.isPlayer && !window._debugPlayerVisibility) {
+            console.log(`🐍 Player snake visible: ${this.visible}, has segments: ${this.segs.length}`);
+            window._debugPlayerVisibility = true;
+        }
 
-        // Draw Outline
-        ctx.strokeStyle = outlineColor;
-        ctx.lineWidth = 2;
-        ctx.shadowBlur = 0;
-        ctx.beginPath();
-        ctx.arc(sx, sy, headRadius + 1, 0, Math.PI * 2);
-        ctx.stroke();
-      } else if (this.glowFrames > 0) {
-         // AI head pulsing white when recently eaten (No colored glow)
-         headShadowColor = '#ffffff'; // Pulse white
-         headShadowBlur = 15; // Keep pulse intense
-      }
+        this.pixiObject.visible = this.visible;
+        if (!this.visible || this.segs.length === 0) {
+            this.pixiObject.clear(); // Clear graphics if not visible or no segments
+            return;
+        }
 
-      // Draw Main Head Fill with Glow
-      ctx.fillStyle = headColor;
-      ctx.shadowColor = headShadowColor;
-      ctx.shadowBlur = headShadowBlur;
-      ctx.beginPath();
-      ctx.arc(sx, sy, headRadius, 0, Math.PI * 2);
-      ctx.fill();
+        const graphics = this.pixiObject;
+        graphics.clear(); // Clear previous frame's drawing
+        
+        // DEBUG: Draw a simple test rectangle if this is the player
+        if (this.isPlayer && !window._hasLoggedSnakePos) {
+            console.log(`🐍 Snake position: ${this.segs[0].x}, ${this.segs[0].y}`);
+            window._hasLoggedSnakePos = true;
+            
+            // Add a simple visible shape that's easier to see
+            graphics.beginFill(0xFF00FF);
+            graphics.drawRect(this.segs[0].x - 20, this.segs[0].y - 20, 40, 40);
+            graphics.endFill();
+        }
 
-      // Player Eyes (Reverted Shadow Blur)
-      if (this.isPlayer) {
-        ctx.fillStyle = '#ffffff'; // White eyes
-        // --- Reverted eye glow ---
-        ctx.shadowBlur = 3; // Reverted from 1
-        ctx.shadowColor = '#ffffff';
-        const angle = Math.atan2(this.dir.y, this.dir.x);
-        const eyeDist = headRadius * 0.5;
-        const eyeRadius = headRadius * 0.2;
-        // Eye 1
-        const eye1X = sx + Math.cos(angle + Math.PI / 4) * eyeDist;
-        const eye1Y = sy + Math.sin(angle + Math.PI / 4) * eyeDist;
-        ctx.beginPath();
-        ctx.arc(eye1X, eye1Y, eyeRadius, 0, Math.PI * 2);
-        ctx.fill();
-        // Eye 2
-        const eye2X = sx + Math.cos(angle - Math.PI / 4) * eyeDist;
-        const eye2Y = sy + Math.sin(angle - Math.PI / 4) * eyeDist;
-        ctx.beginPath();
-        ctx.arc(eye2X, eye2Y, eyeRadius, 0, Math.PI * 2);
-        ctx.fill();
-      }
+        const baseColor = this.glowFrames > 0 ? 0xffffff : this.color;
+        const playerGlowColor = 0xFFFF00; // Bright yellow glow for player
+        const outlineColor = 0xffffff; // White outline
+        const playerGlowStrength = 9; // Base glow strength
+
+        // --- Draw Snake Body Segments ---
+        for (let i = 0; i < this.segs.length - 1; i++) {
+            const p1 = this.segs[i];
+            const p2 = this.segs[i + 1];
+
+            // --- Calculate Segment Width (incorporating eat wave) ---
+            const baseW = segRadius(this.length()) * 2; // Use segRadius for base width calculation
+            const swellDist = 5; // How many segments the swell affects
+            const swellFactor = this.eatQueue.reduce((maxFactor, wavePos) => {
+                const distFromWave = Math.abs(i - wavePos);
+                const factor = Math.max(0, 1 - distFromWave / swellDist);
+                return Math.max(maxFactor, factor);
+            }, 0);
+            const currentWidth = baseW * (1 + swellFactor * 0.5); // Swell up to 50%
+            const isPulsing = swellFactor > 0.01;
+
+            // --- Determine Segment Style ---
+            let segmentColor;
+            let glowColor = null;
+            let glowStrength = 0;
+            const isSafePlayerSegment = this.isPlayer && playerSkipCount > 0 && i < playerSkipCount;
+
+            if (isSafePlayerSegment) {
+                segmentColor = 0x0099aa; // Teal for safe segments
+                glowColor = 0x0099aa;
+                glowStrength = 3; // Subtle glow for safe part
+            } else if (this.isPlayer) {
+                segmentColor = isPulsing ? 0xffffff : baseColor; // White pulse on player
+                glowColor = playerGlowColor;
+                glowStrength = isPulsing ? playerGlowStrength + 4 : playerGlowStrength; // Boost glow during pulse
+            } else { // AI Snake
+                segmentColor = isPulsing ? 0xffffff : baseColor; // White pulse on AI
+                if (isPulsing) {
+                    glowColor = 0xffffff;
+                    glowStrength = 15; // Intense white glow for AI pulse
+                }
+                // Optional: Add subtle base glow for AI?
+                // else { glowColor = baseColor; glowStrength = 2; }
+            }
+
+            // --- Draw Outline (Player Only, drawn first underneath) ---
+            if (this.isPlayer) {
+                graphics.moveTo(p1.x, p1.y);
+                // Use lineStyle object format
+                graphics.lineStyle({ width: currentWidth + 2, color: outlineColor, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
+                graphics.lineTo(p2.x, p2.y);
+                graphics.stroke(); // Stroke the outline path
+            }
+
+            // --- Draw Simple Glow (if applicable, underneath main segment) ---
+            if (glowColor !== null && glowStrength > 0) {
+                graphics.moveTo(p1.x, p1.y);
+                graphics.lineStyle({
+                    width: currentWidth + glowStrength, // Thicker for glow
+                    color: glowColor,
+                    alpha: 0.25, // Semi-transparent
+                    cap: PIXI.LINE_CAP.ROUND,
+                    join: PIXI.LINE_JOIN.ROUND
+                });
+                graphics.lineTo(p2.x, p2.y);
+                graphics.stroke(); // Stroke the glow path
+            }
+
+            // --- Draw Main Segment (on top) ---
+            graphics.moveTo(p1.x, p1.y);
+            graphics.lineStyle({ width: currentWidth, color: segmentColor, cap: PIXI.LINE_CAP.ROUND, join: PIXI.LINE_JOIN.ROUND });
+            graphics.lineTo(p2.x, p2.y);
+            graphics.stroke(); // Stroke the main segment path
+        }
+
+
+        // --- Draw Head ---
+        if (this.segs.length > 0) {
+            const headSeg = this.segs[0];
+            let headRadius = segRadius(this.length()); // Use segRadius for head size
+            const headColor = this.glowFrames > 0 ? 0xffffff : this.color;
+            let headGlowColor = null;
+            let headGlowStrength = 0;
+
+            if (this.isPlayer) {
+                headRadius += 1; // Slightly larger player head
+                headGlowColor = playerGlowColor;
+                headGlowStrength = playerGlowStrength + 2;
+                // Draw Head Outline (using stroke on a circle path)
+                 graphics.circle(headSeg.x, headSeg.y, headRadius + 1);
+                 graphics.stroke({ width: 2, color: outlineColor });
+
+            } else if (this.glowFrames > 0) { // AI head pulsing white
+                headGlowColor = 0xffffff;
+                headGlowStrength = 15;
+            }
+
+            // --- Draw Simple Head Glow (underneath fill) ---
+            if (headGlowColor !== null && headGlowStrength > 0) {
+                 graphics.circle(headSeg.x, headSeg.y, headRadius + headGlowStrength / 2);
+                 graphics.fill({ color: headGlowColor, alpha: 0.3 });
+            }
+
+            // --- Draw Head Fill (on top) ---
+             graphics.circle(headSeg.x, headSeg.y, headRadius);
+             graphics.fill({ color: headColor });
+
+
+            // --- Draw Player Eyes ---
+            if (this.isPlayer) {
+                // Use current velocity (vx, vy) for eye direction
+                const angle = Math.atan2(this.vy, this.vx);
+                const eyeDist = headRadius * 0.5; // Distance from center
+                const eyeRadius = Math.max(2, headRadius * 0.2); // Ensure minimum size
+                const eyeColor = 0xffffff;
+                const eyeGlowColor = 0xffffff;
+                const eyeGlowStrength = 1; // Subtle eye glow
+
+                // Calculate eye positions
+                const eye1X = headSeg.x + Math.cos(angle + Math.PI / 4) * eyeDist;
+                const eye1Y = headSeg.y + Math.sin(angle + Math.PI / 4) * eyeDist;
+                const eye2X = headSeg.x + Math.cos(angle - Math.PI / 4) * eyeDist;
+                const eye2Y = headSeg.y + Math.sin(angle - Math.PI / 4) * eyeDist;
+
+                // Simple Eye Glow (underneath fill)
+                 graphics.circle(eye1X, eye1Y, eyeRadius + eyeGlowStrength);
+                 graphics.fill({ color: eyeGlowColor, alpha: 0.4 });
+                 graphics.circle(eye2X, eye2Y, eyeRadius + eyeGlowStrength);
+                 graphics.fill({ color: eyeGlowColor, alpha: 0.4 });
+
+
+                // Eye Fill (on top)
+                 graphics.circle(eye1X, eye1Y, eyeRadius);
+                 graphics.fill({ color: eyeColor });
+                 graphics.circle(eye2X, eye2Y, eyeRadius);
+                 graphics.fill({ color: eyeColor });
+
+            }
+        }
     }
-    // --- End Head ---
 
-    ctx.shadowBlur = 0; // Reset shadow for other draw calls
-  }
+    destroyPixi(container) { // Pass container for removal check
+        if (this.pixiObject && !this.pixiObject.destroyed) {
+            // Remove from parent ONLY if it's the expected container or exists
+            if (this.pixiObject.parent && (this.pixiObject.parent === container || container?.children.includes(this.pixiObject))) {
+                 this.pixiObject.parent.removeChild(this.pixiObject);
+            } else if (this.pixiObject.parent) {
+                 // Fallback if parent mismatch but exists
+                 console.warn(`Snake ${this.id} parent mismatch during destroyPixi, attempting removal from current parent.`);
+                 this.pixiObject.parent.removeChild(this.pixiObject);
+            }
+            this.pixiObject.destroy({ children: true }); // Destroy graphics object
+        }
+        this.pixiObject = null; // Clear reference
+        this.visible = false; // Ensure game state matches
+    }
 }
 
 /**

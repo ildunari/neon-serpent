@@ -1,260 +1,352 @@
-/*  Neon Serpent — Modular React Build
-    React + HTML5 canvas
-    2025-04-17   */
-// Verification checklist (Updated 2025-05-20):
-//   [X] NeonSerpentGame.jsx compiles without the old loop (handled by edit)
-//   [ ] Only one RAF appears in DevTools Performance tab (Manual check required)
-//   [ ] Game still enters 'gameover' correctly (Manual check required)
-
+/*
+ * src/NeonSerpentGame.jsx
+ * Manages game state, input, and the fixed-timestep logic loop.
+ * Renders GameCanvas and UI overlays.
+ */
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import GameCanvas from './components/GameCanvas';
+import GameCanvas from './components/GameCanvas'; // PixiJS version
 import MenuOverlay from './components/MenuOverlay';
 import ControlsOverlay from './components/ControlsOverlay';
-import { createWorld, updateWorld } from './world';
-import { useKeyboard, useJoystick } from './input'; // Import input hooks from barrel file
-import { TURN_COOLDOWN_MS, JOY_TURN_COOLDOWN_MS, WORLD_SIZE } from './constants'; // Import cooldown constants & WORLD_SIZE
-import { willHitTail, playerSkip } from './utils/math'; // Import turn safety helper & playerSkip
+import { createWorld, updateWorld } from './world'; // World simulation logic
+import { useKeyboard, useJoystick } from './input'; // Input hooks
+import { TURN_COOLDOWN_MS, JOY_TURN_COOLDOWN_MS, WORLD_SIZE, TICK_MS, BG_SRC } from './constants'; // Game constants
+import { willHitTail, playerSkip } from './utils/math'; // Utility functions
 
-// Define menu options and controls info
+// Controls info for the overlay
 const controlsInfo = [
-  { label: 'Move', icons: ['/w.png', '/a.png', '/s.png', '/d.png'], fallback: 'WASD' },
-  { label: 'Move', icons: ['/up.png', '/left.png', '/down.png', '/right.png'], fallback: 'Arrow Keys' },
-  { label: 'Select/Pause', icons: ['/space.png'], fallback: 'Space/Enter' },
-  { label: 'Back', icons: [], fallback: 'Esc' },
-  { label: 'Touch', icons: [], fallback: 'Virtual Joystick (Tap & Drag)' },
+    { label: 'Move', icons: ['/w.png', '/a.png', '/s.png', '/d.png'], fallback: 'WASD' },
+    { label: 'Move', icons: ['/up.png', '/left.png', '/down.png', '/right.png'], fallback: 'Arrow Keys' },
+    { label: 'Select/Pause/Resume', icons: ['/space.png'], fallback: 'Space/Enter' },
+    { label: 'Back/Pause', icons: [], fallback: 'Esc' },
+    { label: 'Touch Move', icons: [], fallback: 'Virtual Joystick (Tap & Drag)' },
+    { label: 'Touch Action', icons: [], fallback: 'Tap Overlay (Resume/Menu)' },
 ];
 
 export default function NeonSerpentGame() {
-  const [gameState, setGameState] = useState('menu'); // Default to 'menu'
-  console.log(`Rendering NeonSerpentGame with gameState: ${gameState}`); // Added log
-  const [menuIndex, setMenuIndex] = useState(0);
-  const [isGameInProgress, setIsGameInProgress] = useState(false); // Track if game is resumable
-  const [playerSkipCount, setPlayerSkipCount] = useState(0); // <--- Add state for skip count
-  const [showControls, setShowControls] = useState(false);
-  const worldRef = useRef(null); // Initialize as null, create world on start
-  const lastTurnRef = useRef(0); // Track last turn time
-  const canvasSizeRef = useRef({ width: window.innerWidth, height: window.innerHeight }); // Track canvas size
-  const canSelectMenu = useRef(false); // Ref to prevent initial menu selection
+    // --- State ---
+    const [gameState, setGameState] = useState('menu'); // menu | playing | paused | gameover
+    const [menuIndex, setMenuIndex] = useState(0);
+    const [isGameInProgress, setIsGameInProgress] = useState(false); // Track if game is resumable
+    const [showControls, setShowControls] = useState(false);
+    const [isCanvasReady, setIsCanvasReady] = useState(false); // New state
 
-  // Initialize input hooks
-  const { dir: keyDir } = useKeyboard();
-  const { joystickState, vec: joyVec } = useJoystick();
+    // --- Refs ---
+    const worldRef = useRef(null); // Holds the game world state
+    const lastTurnRef = useRef(0); // Tracks last player turn time
+    const gameLogicIntervalRef = useRef(null); // Ref for the fixed timestep interval
+    const canSelectMenu = useRef(false); // Prevent immediate menu selection on load
+    const videoRef = useRef(null); // Ref for the background video element
 
-  // Update canvas size ref on resize (could also get from useResizeCanvas if needed)
-  useEffect(() => {
-    const handleResize = () => {
-      canvasSizeRef.current = { width: window.innerWidth, height: window.innerHeight };
-    };
-    window.addEventListener('resize', handleResize);
-    handleResize(); // <-- Add this initial call
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
+    // --- Input Hooks ---
+    const { dir: keyDir } = useKeyboard();
+    const { joystickState, vec: joyVec } = useJoystick();
 
-  // Allow menu selection only after a short delay to prevent initial phantom space press
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      canSelectMenu.current = true;
-    }, 100); // 100ms delay, adjust if needed
-    return () => clearTimeout(timer); // Cleanup timer on unmount
-  }, []);
+    // --- Functions ---
 
-  // Initialize world only when starting the game
-  const startGame = useCallback(() => {
-    console.log("Creating new world and starting game...");
-    worldRef.current = createWorld();
-    lastTurnRef.current = 0; // Reset turn timer
-    setShowControls(false);
-    setIsGameInProgress(true); // Mark game as in progress
-    setGameState('playing');
-  }, []);
+    // Stop the fixed timestep game logic loop
+    const stopGameLogicLoop = useCallback(() => {
+        if (gameLogicIntervalRef.current) {
+            clearInterval(gameLogicIntervalRef.current);
+            gameLogicIntervalRef.current = null;
+            console.log("Game logic loop stopped.");
+        }
+    }, []);
 
-  // Add this useEffect to snap camera when entering 'playing' state
-  useEffect(() => {
-    if (gameState === 'playing' && worldRef.current) {
-      const { width, height } = canvasSizeRef.current;
-      // Ensure dimensions and world/player refs are valid before calculation
-      if (width && height && worldRef.current.player?.segs?.[0]) {
-        const p = worldRef.current.player;
-        worldRef.current.cam.x = p.segs[0].x - width  * 0.5;
-        worldRef.current.cam.y = p.segs[0].y - height * 0.5;
-        // console.log('Camera snapped on entering playing state.'); // Optional: for debugging
-      }
-    }
-  }, [gameState]); // Re-run only when gameState changes
+    // Start/Restart Game
+    const startGame = useCallback(() => {
+        console.log("Starting/Restarting game...");
+        stopGameLogicLoop(); // Ensure any previous loop is stopped
+        setIsCanvasReady(false); // Reset canvas ready state
+        worldRef.current = createWorld(); // Create fresh world state
+        console.log("World created:", {
+            hasPlayer: !!worldRef.current?.player,
+            snakeCount: worldRef.current?.snakes?.length,
+            orbCount: worldRef.current?.orbs?.length,
+            camPosition: worldRef.current?.cam
+        });
+        lastTurnRef.current = 0;
+        setShowControls(false);
+        setIsGameInProgress(true);
+        setGameState('playing');
+        // Ensure video plays if paused
+        if (videoRef.current && videoRef.current.paused) {
+            videoRef.current.play().catch(err => console.warn("Video autoplay failed:", err));
+        }
+    }, [stopGameLogicLoop]);
 
-  // Define menu/controls handlers *before* the effect that uses them
-  const handleMenuSelect = useCallback((idx, currentOptions) => {
-    // We need currentOptions passed here now as it's dynamic
-    setMenuIndex(idx);
-    const action = currentOptions[idx]; // Use the passed options array
-    console.log(`Menu action selected: ${action}`); // Debug log
+    // Callback for GameCanvas
+    const handleCanvasReady = useCallback(() => {
+        console.log("NeonSerpentGame received canvas ready signal.");
+        setIsCanvasReady(true);
+    }, []);
 
-    if (action === 'Resume') {
-      setGameState('playing');
-    } else if (action === 'Start Game' || action === 'Restart Game') {
-      startGame(); // This sets isGameInProgress = true
-    } else if (action === 'Controls') {
-      setShowControls(true);
-    }
-  }, [startGame]); // startGame is a dependency
+    // --- Effects ---
 
-  const handleControlsBack = useCallback(() => {
-    setShowControls(false);
-  }, []);
+    // Prevent immediate menu selection on load
+    useEffect(() => {
+        const timer = setTimeout(() => { canSelectMenu.current = true; }, 200); // Slightly longer delay
+        return () => clearTimeout(timer);
+    }, []);
 
-  // Input Handling Effect (runs independently of render loop)
-  useEffect(() => {
-    // Only process input if playing and player exists
-    if (gameState !== 'playing' || !worldRef.current?.player) return;
+    // Game Logic Loop (Fixed Timestep)
+    useEffect(() => {
+        if (gameState === 'playing' && isCanvasReady) {
+            console.log("Starting game logic loop (Canvas is ready)...");
+            let lastLogicTimestamp = performance.now();
 
-    const now = Date.now();
-    const turnCooldown = joystickState.active ? JOY_TURN_COOLDOWN_MS : TURN_COOLDOWN_MS;
-    let desiredDir = null;
+            // Ensure video is playing
+            if (videoRef.current && videoRef.current.paused) {
+                 videoRef.current.play().catch(err => console.warn("Video play failed on resume:", err));
+            }
 
-    // Determine desired direction from input
-    if (joystickState.active && joyVec) {
-      desiredDir = joyVec;
-    } else if (!joystickState.active && (keyDir.x !== 0 || keyDir.y !== 0)) {
-      // Only use keyboard if joystick is not active
-      desiredDir = keyDir;
-    }
+            gameLogicIntervalRef.current = setInterval(() => {
+                const now = performance.now();
+                const dt = now - lastLogicTimestamp; // Calculate delta time
+                lastLogicTimestamp = now;
 
-    // Process turn if a direction is desired and cooldown has passed
-    if (desiredDir && now - lastTurnRef.current > turnCooldown) {
-      const player = worldRef.current.player;
-      const head = player.segs[0];
+                if (worldRef.current && worldRef.current.player && !worldRef.current.player.dead) {
+                    // --- Input Processing (Update player velocity directly) ---
+                    const inputTimestamp = Date.now(); // Use Date.now for cooldowns
+                    const turnCooldown = joystickState.active ? JOY_TURN_COOLDOWN_MS : TURN_COOLDOWN_MS;
+                    let desiredDir = null;
+                    const player = worldRef.current.player;
 
-      // Calculate next head position based on desired direction for collision check
-      // Ensures wrap-around logic is considered for the check
-      const nextX = (head.x + desiredDir.x * player.speed + WORLD_SIZE) % WORLD_SIZE;
-      const nextY = (head.y + desiredDir.y * player.speed + WORLD_SIZE) % WORLD_SIZE;
+                    // Determine desired direction from input sources
+                    if (joystickState.active && joyVec) {
+                        desiredDir = joyVec; // Use normalized vector from joystick hook
+                    } else if (!joystickState.active && (keyDir.x !== 0 || keyDir.y !== 0)) {
+                        desiredDir = keyDir; // Use direction vector from keyboard hook
+                    }
 
-      // Check if the turn would immediately collide with the tail/neck
-      const skipCount = playerSkip(player); // Calculate skip count for the check
-      const wouldBite = willHitTail(nextX, nextY, player.segs, skipCount);
+                    // Apply turn if valid
+                    if (desiredDir && inputTimestamp - lastTurnRef.current > turnCooldown) {
+                        const head = player.segs[0];
+                        // Predict next position based on *desired* direction
+                        const nextX = (head.x + desiredDir.x * player.speed + WORLD_SIZE) % WORLD_SIZE;
+                        const nextY = (head.y + desiredDir.y * player.speed + WORLD_SIZE) % WORLD_SIZE;
+                        const skipCount = playerSkip(player);
+                        const wouldBite = willHitTail(nextX, nextY, player.segs, skipCount);
 
-      // Update player direction if the turn is safe
-      if (!wouldBite) {
-        player.dir.x = desiredDir.x;
-        player.dir.y = desiredDir.y;
-        lastTurnRef.current = now;
-        // console.log(`Turn accepted: ${desiredDir.x}, ${desiredDir.y}`); // Optional debug
-      }
-    }
-  }, [gameState, keyDir, joyVec, joystickState.active, worldRef]); // Dependencies
+                        // Prevent exact 180 turns using dot product with current velocity
+                        const isReversing = (desiredDir.x * player.vx + desiredDir.y * player.vy) < -0.9;
 
-  // Menu Navigation and Selection + Global Key Handlers
-  useEffect(() => {
-    // Define dynamic menu options based on game state
+                        if (!wouldBite && !isReversing) {
+                            // Update player's velocity vector
+                            player.vx = desiredDir.x;
+                            player.vy = desiredDir.y;
+                            // player.dir.x = desiredDir.x; // Sync dir object if needed elsewhere
+                            // player.dir.y = desiredDir.y;
+                            lastTurnRef.current = inputTimestamp; // Update last turn time
+                        }
+                    }
+                    // --- End Input Processing ---
+
+                    // --- Update World Simulation ---
+                    // Pass delta time (dt) for frame-independent physics/updates if needed
+                    worldRef.current = updateWorld(worldRef.current, dt);
+
+                    // Game over state check is handled by the Pixi render loop in GameCanvas
+                    // based on worldRef.current.player.dead flag
+
+                } else if (worldRef.current && worldRef.current.player && worldRef.current.player.dead) {
+                     // Player is dead, stop the logic loop (render loop handles state change)
+                     console.log("Player dead, stopping logic loop from within interval.");
+                     stopGameLogicLoop();
+                }
+            }, TICK_MS); // Run at desired fixed interval (e.g., ~16.67ms for 60Hz)
+
+            // Cleanup function for when gameState changes *away* from 'playing' or component unmounts
+            return () => {
+                 console.log("Cleaning up game logic loop effect (gameState changed or unmount).");
+                 stopGameLogicLoop();
+                 // Pause video when not playing
+                 if (videoRef.current) {
+                     videoRef.current.pause();
+                 }
+            };
+        } else {
+            // Ensure loop is stopped and video paused if not in 'playing' state
+            stopGameLogicLoop();
+            if (videoRef.current) {
+                 videoRef.current.pause();
+            }
+        }
+        // No explicit return needed here, the return inside the 'if (gameState === 'playing')' handles cleanup
+
+    }, [gameState, isCanvasReady, stopGameLogicLoop, keyDir, joyVec, joystickState.active]);
+
+
+    // Menu/Controls Handlers
+    const handleMenuSelect = useCallback((idx, currentOptions) => {
+        if (!canSelectMenu.current) return; // Prevent selection too early
+        setMenuIndex(idx);
+        const action = currentOptions[idx];
+        console.log(`Menu action selected: ${action}`);
+        if (action === 'Resume') {
+            setGameState('playing');
+        } else if (action === 'Start Game' || action === 'Restart Game') {
+            startGame();
+        } else if (action === 'Controls') {
+            setShowControls(true);
+        }
+    }, [startGame]); // Added startGame dependency
+
+    const handleControlsBack = useCallback(() => {
+        setShowControls(false);
+    }, []);
+
+
+    // Global Key Handlers & Menu Navigation
+    useEffect(() => {
+        const currentMenuOptions = isGameInProgress
+            ? ['Resume', 'Controls', 'Restart Game']
+            : ['Start Game', 'Controls']; // Don't offer restart from initial menu
+
+        const handleKeyDown = (e) => {
+            // Stop propagation only if we handle the key to prevent default actions like scrolling
+             let handled = false;
+
+            if (gameState === 'menu' && !showControls) {
+                if (e.key === 'ArrowUp' || e.key === 'w') {
+                    setMenuIndex(prev => (prev - 1 + currentMenuOptions.length) % currentMenuOptions.length);
+                    handled = true;
+                } else if (e.key === 'ArrowDown' || e.key === 's') {
+                    setMenuIndex(prev => (prev + 1) % currentMenuOptions.length);
+                    handled = true;
+                } else if (e.key === 'Enter' || e.key === ' ') {
+                    if (canSelectMenu.current) {
+                        handleMenuSelect(menuIndex, currentMenuOptions);
+                    }
+                    handled = true;
+                } else if (e.key === 'Escape' && isGameInProgress) {
+                    // Resume game if Esc pressed in menu and game is in progress
+                    setGameState('playing');
+                    handled = true;
+                }
+            } else if (gameState === 'playing') {
+                if (e.key === 'Escape') {
+                    setGameState('menu'); // Pause and show menu
+                    handled = true;
+                } else if (e.key === ' ') {
+                    // Use space to toggle simple pause state
+                    setGameState('paused');
+                    handled = true;
+                }
+            } else if (gameState === 'paused') {
+                if (e.key === 'Escape' || e.key === ' ') {
+                    setGameState('playing'); // Resume from simple pause
+                    handled = true;
+                }
+            } else if (gameState === 'gameover' && (e.key === 'Enter' || e.key === ' ')) {
+                setIsGameInProgress(false); // Reset progress flag
+                setGameState('menu');
+                setMenuIndex(0); // Reset menu to top
+                handled = true;
+            } else if (showControls && e.key === 'Escape') {
+                handleControlsBack();
+                handled = true;
+            }
+
+            if (handled) {
+                 e.preventDefault(); // Prevent default browser action only if key was handled
+                 e.stopPropagation(); // Prevent other listeners if handled
+            }
+        };
+
+        // Use capture phase to potentially catch events earlier
+        window.addEventListener('keydown', handleKeyDown, true);
+        return () => window.removeEventListener('keydown', handleKeyDown, true);
+
+    }, [gameState, menuIndex, showControls, handleMenuSelect, handleControlsBack, isGameInProgress]); // Dependencies
+
+
+    // Determine current menu options for rendering based on game progress
     const currentMenuOptions = isGameInProgress
-      ? ['Resume', 'Controls', 'Restart Game']
-      : ['Start Game', 'Controls', 'Restart Game'];
+        ? ['Resume', 'Controls', 'Restart Game']
+        : ['Start Game', 'Controls'];
 
-    const handleKeyDown = (e) => {
-      // console.log(`[KeyDown] Key: ${e.key}, GameState: ${gameState}, InProgress: ${isGameInProgress}`); // DEBUG
 
-      if (gameState === 'menu' && !showControls) {
-        if (e.key === 'ArrowUp' || e.key === 'w') {
-          setMenuIndex(prev => (prev - 1 + currentMenuOptions.length) % currentMenuOptions.length);
-        } else if (e.key === 'ArrowDown' || e.key === 's') {
-          setMenuIndex(prev => (prev + 1) % currentMenuOptions.length);
-        } else if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          if (canSelectMenu.current) {
-            handleMenuSelect(menuIndex, currentMenuOptions);
-          }
-        } else if (e.key === 'Escape' && isGameInProgress) {
-          // Add Escape key behavior for menu state: Resume if possible
-          e.preventDefault();
-          setGameState('playing'); // Resume the game
-        }
-      } else if (gameState === 'playing') { // Handle keys during gameplay
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          setGameState('menu'); // Go back to menu (will show Resume option)
-        } else if (e.key === ' ') { // Space still uses simple pause
-          e.preventDefault();
-          setGameState('paused');
-        }
-      } else if (gameState === 'paused') { // Simple pause state
-        if (e.key === 'Escape' || e.key === ' ') {
-          e.preventDefault();
-          setGameState('playing'); // Resume from simple pause
-        }
-      } else if (gameState === 'gameover' && (e.key === 'Enter' || e.key === ' ')) {
-        e.preventDefault();
-        setIsGameInProgress(false); // Game ended, no longer resumable
-        setGameState('menu');
-        setMenuIndex(0);
-      } else if (showControls && e.key === 'Escape') {
-        handleControlsBack();
-      }
-    };
+    // --- Render ---
+    return (
+        <div className="game-container" style={{ background: '#000' }}> {/* Ensure fallback background */}
+            {/* Background Video Element */}
+             <video
+                ref={videoRef} // Add ref
+                // Use constant for source
+                // Provide multiple sources for better compatibility
+                // Order matters: browser picks the first it supports
+                loop
+                muted // Required for autoplay in many browsers
+                playsInline // Important for mobile
+                autoPlay // Attempt autoplay (might be blocked by browser)
+                style={{
+                    position: 'absolute',
+                    top: 0, left: 0, width: '100%', height: '100%',
+                    objectFit: 'cover',
+                    zIndex: 0, // Behind canvas and overlays
+                    pointerEvents: 'none'
+                 }}
+              >
+                 {/* Example using AV1 and H.264 fallback */}
+                 {/* <source src="/cave_city.mp4" type="video/mp4; codecs=av01.0.05M.08" /> */}
+                 <source src={BG_SRC} type="video/mp4" /> {/* Use H.264 as primary/fallback */}
+                 Your browser does not support the video tag.
+             </video>
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [gameState, menuIndex, showControls, handleMenuSelect, handleControlsBack, isGameInProgress]);
+            {/* Render PixiJS Canvas (handles its own drawing loop) */}
+            <GameCanvas
+                gameState={gameState}
+                worldRef={worldRef}
+                setGameState={setGameState} // Pass setter for game over detection
+                onReady={handleCanvasReady} // Pass the callback here
+            />
 
-  // Determine current menu options for rendering
-  const currentMenuOptions = isGameInProgress
-    ? ['Resume', 'Controls', 'Restart Game']
-    : ['Start Game', 'Controls', 'Restart Game'];
+            {/* --- UI Overlays --- */}
+            {gameState === 'menu' && !showControls && (
+                <MenuOverlay
+                    menuIndex={menuIndex}
+                    setMenuIndex={setMenuIndex}
+                    onSelect={(idx) => handleMenuSelect(idx, currentMenuOptions)}
+                    menuOptions={currentMenuOptions}
+                />
+            )}
+            {showControls && (
+                <ControlsOverlay onBack={handleControlsBack} controlsInfo={controlsInfo} />
+            )}
+            {gameState === 'paused' && (
+                <div
+                    className="overlay simple-overlay tappable-overlay"
+                    onClick={() => setGameState('playing')} // Tap/Click to resume
+                    style={{ zIndex: 10 }} // Ensure above canvas
+                >
+                    <h2>Paused</h2>
+                    <p style={{ fontSize: '0.6em' }}>Tap/Click or press Space/Esc to Resume</p>
+                </div>
+            )}
+            {gameState === 'gameover' && (
+                <div
+                    className="overlay simple-overlay tappable-overlay"
+                    onClick={() => { // Tap/Click to return to menu
+                        setIsGameInProgress(false);
+                        setGameState('menu');
+                        setMenuIndex(0);
+                    }}
+                    style={{ zIndex: 10 }} // Ensure above canvas
+                >
+                    <h2>Game Over</h2>
+                    <p>Score: {worldRef.current?.player?.score ?? 0}</p>
+                    <p style={{ fontSize: '0.6em' }}>Tap/Click or press Enter/Space to Return to Menu</p>
+                </div>
+            )}
 
-  return (
-    <div className="game-container"> {/* Add a container div */}
-      {/* Always render canvas, but drawing depends on state */}
-      <GameCanvas
-        gameState={gameState}
-        worldRef={worldRef}
-        playerSkipCount={playerSkipCount}
-        setGameState={setGameState}
-        setPlayerSkipCount={setPlayerSkipCount}
-      />
-
-      {/* Conditional Overlays */}
-      {gameState === 'menu' && !showControls && (
-        <MenuOverlay
-          menuIndex={menuIndex}
-          setMenuIndex={setMenuIndex}
-          onSelect={(idx) => handleMenuSelect(idx, currentMenuOptions)} // Pass options to handler
-          menuOptions={currentMenuOptions} // Pass dynamic options
-        />
-      )}
-      {showControls && (
-        <ControlsOverlay onBack={handleControlsBack} controlsInfo={controlsInfo} /> // Pass info
-      )}
-      {/* Restored simple pause overlay with updated text and onClick */}
-      {gameState === 'paused' && (
-        <div
-          className="overlay simple-overlay tappable-overlay"
-          onClick={() => setGameState('playing')} // Add onClick to resume
-        >
-          <h2>Paused</h2>
-          <p>Tap/Click or press Space/Esc to Resume</p>
+            {/* --- Joystick UI (Rendered on top) --- */}
+            {/* Only show joystick when playing and it's active */}
+            {gameState === 'playing' && joystickState.active && (
+                <div className="joystick-ui" style={{ zIndex: 20 }}> {/* Ensure joystick UI is on top */}
+                    <div className="joystick-base" style={{ left: `${joystickState.cx}px`, top: `${joystickState.cy}px` }}></div>
+                    <div className="joystick-knob" style={{ left: `${joystickState.cx + joystickState.dx}px`, top: `${joystickState.cy + joystickState.dy}px` }}></div>
+                </div>
+            )}
         </div>
-      )}
-      {/* Add Game Over overlay with restart logic */}
-      {gameState === 'gameover' && (
-        <div
-          className="overlay simple-overlay tappable-overlay"
-          onClick={() => { // Add onClick to restart
-            setIsGameInProgress(false);
-            setGameState('menu');
-            setMenuIndex(0);
-          }}
-        >
-          <h2>Game Over</h2>
-          <p>Score: {worldRef.current?.player?.score ?? 0}</p> {/* Display score */}
-          <p>Tap/Click or press Enter/Space to Restart</p>
-        </div>
-      )}
-      {/* Render Joystick UI only when playing and joystick is active */}
-      {gameState === 'playing' && joystickState.active && (
-          <div className="joystick-ui">
-              <div className="joystick-base" style={{ left: `${joystickState.cx}px`, top: `${joystickState.cy}px` }}></div>
-              <div className="joystick-knob" style={{ left: `${joystickState.cx + joystickState.dx}px`, top: `${joystickState.cy + joystickState.dy}px` }}></div>
-          </div>
-      )}
-    </div> /* Close container div */
-  );
+    );
 }
